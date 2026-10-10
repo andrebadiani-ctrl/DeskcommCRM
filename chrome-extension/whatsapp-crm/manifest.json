@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "DeskcommCRM — CRM no WhatsApp Web",
+  "short_name": "DeskcommCRM",
+  "version": "0.1.0",
+  "description": "Estágio de funil e notas por contato dentro do WhatsApp Web, com disparo em lote cadenciado.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://web.whatsapp.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["nucleo.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

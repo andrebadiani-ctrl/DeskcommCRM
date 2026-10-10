@@ -28,5 +28,8 @@ scratchpad
 
 # Artefatos locais de QA não fazem parte do runtime.
 evidence
+
+# Extensão de navegador: instalada no Chrome do usuário, nunca no servidor.
+chrome-extension
 .superpowers
 *.tsbuildinfo

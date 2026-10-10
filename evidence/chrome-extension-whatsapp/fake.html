@@ -1,0 +1,17 @@
+<!doctype html><html><body class="dark">
+<div id="app"><div id="side">lista</div>
+<div id="main"><header><span dir="auto" title="__TITULO__">__TITULO__</span></header>
+<div id="msgs"></div>
+<footer><div contenteditable="true" role="textbox" data-tab="10" id="box"></div>
+<button aria-label="Send" id="send"><span data-icon="send"></span></button></footer></div></div>
+<script>
+const q = new URLSearchParams(location.search);
+const box = document.getElementById('box');
+if (q.get('phone') === '5500000000000') { document.getElementById('main').remove();
+  const d=document.createElement('div'); d.setAttribute('role','dialog'); d.innerHTML='Número inválido <button>OK</button>'; document.body.append(d); }
+if (q.get('text')) box.textContent = q.get('text');
+if (q.get('phone')) { const m=document.createElement('div'); m.setAttribute('data-id', `false_${q.get('phone')}@c.us_ABC`); document.getElementById('msgs')?.append(m); }
+document.getElementById('send')?.addEventListener('click', () => {
+  const env = JSON.parse(localStorage.getItem('enviados')||'[]'); env.push({phone:q.get('phone'), text: box.textContent});
+  localStorage.setItem('enviados', JSON.stringify(env)); box.textContent=''; });
+</script></body></html>
