@@ -208,7 +208,8 @@ export class WhatsAppSimulado extends EventEmitter {
     return lead.whatsappJid ? this.enviarParaJid(lead.whatsappJid, texto) : this.enviar(lead.telefone, texto);
   }
 
-  async enviarParaJid(jid, texto, { citar } = {}) {
+  /** `daIA` = escrita pela IA: o cliente de mentira não responde (senão os dois conversariam sem fim). */
+  async enviarParaJid(jid, texto, { citar, daIA = false } = {}) {
     if (this.status !== "conectado") throw new Error("WhatsApp não está conectado");
     const id = randomUUID();
     const em = new Date().toISOString();
@@ -216,7 +217,7 @@ export class WhatsAppSimulado extends EventEmitter {
     // O WhatsApp real devolve o eco da mensagem enviada; o sistema desduplica pelo id.
     this.#mensagem(jid, { texto, fromMe: true, em, id, citacao });
     // Respondeu citando? O cliente responde citando de volta a sua mensagem.
-    this.#responderDepois(jid, RESPOSTAS[Math.floor(Math.random() * RESPOSTAS.length)], citacao ? { id, texto } : null);
+    if (!daIA) this.#responderDepois(jid, RESPOSTAS[Math.floor(Math.random() * RESPOSTAS.length)], citacao ? { id, texto } : null);
     return { jid, id, em };
   }
 }

@@ -12,9 +12,10 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
-    "test": "node testes/eventos-whatsapp.mjs && node testes/painel.mjs && node testes/chat.mjs"
+    "test": "node testes/eventos-whatsapp.mjs && node testes/painel.mjs && node testes/chat.mjs && node testes/ia.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
     "@whiskeysockets/baileys": "7.0.0-rc14",
     "express": "^4.22.3",
     "pino": "^10.4.0",

@@ -13,6 +13,7 @@ import { ErroValidacao, Store, chaveTelefone } from "./store.mjs";
 import { Followups } from "./followups.mjs";
 import { LIMITE_IMPORTACAO, normalizarLinha } from "./importacao.mjs";
 import { duracaoOgg, webmParaOgg } from "./audio-voz.mjs";
+import { AssistenteIA, ETAPA_HUMANO, ETAPA_IA, ErroIA } from "./ia.mjs";
 import { paginaDoPedido } from "./impressao.mjs";
 import { resumoDoPainel } from "./painel.mjs";
 import { Pedidos, STATUS_PEDIDO, STATUS_VENDA, resumoPagamento } from "./pedidos.mjs";
@@ -35,6 +36,8 @@ const pedidos = new Pedidos(DADOS);
 await pedidos.carregar();
 const tarefas = new Tarefas(DADOS);
 await tarefas.carregar();
+const ia = new AssistenteIA(DADOS);
+await ia.carregar();
 const conversas = new Conversas(DADOS);
 await conversas.carregar();
 // WA_SIMULADO=1: modo demonstração, sem celular (ver whatsapp-simulado.mjs).
@@ -67,6 +70,13 @@ function avisarConversas() {
 function leadDaConversa(jid, telefone) {
   return store.listar().find((l) => l.whatsappJid === jid) || (telefone ? store.porTelefone(telefone) : undefined);
 }
+
+// Lead colocado em "Em atendimento IA" com mensagem do cliente sem resposta: a IA assume.
+store.on("etapa", (lead, anterior) => {
+  if (lead.etapa !== ETAPA_IA || anterior === ETAPA_IA || !ia.config.autoAtendimento) return;
+  const c = conversas.listar().find((x) => x.jid === lead.whatsappJid || (x.telefone && chaveTelefone(x.telefone) === chaveTelefone(lead.telefone)));
+  if (c) ia.agendar(c.jid, atenderComIA);
+});
 
 whatsapp.on("conversa", (dados) => {
   conversas.atualizarDados(dados.jid, dados);
@@ -112,6 +122,7 @@ whatsapp.on("mensagem", async ({ jid, jidWhatsapp, id, fromMe, telefone, nome, t
       });
     }
     if (!lead) return;
+    if (!fromMe && nova && lead.etapa === ETAPA_IA && ia.config.autoAtendimento) ia.agendar(jid, atenderComIA);
     if (!fromMe) followups.aoReceberMensagem(lead, msg); // resposta do lead cancela follow-ups; "PARAR" descadastra
     await store.registrarMensagem(lead.id, msg);
     transmitir("leads", { motivo: "mensagem", id: lead.id });
@@ -119,6 +130,86 @@ whatsapp.on("mensagem", async ({ jid, jidWhatsapp, id, fromMe, telefone, nome, t
     console.error("Falha ao registrar mensagem do WhatsApp:", e);
   }
 });
+
+// ---- assistente de IA ----
+/** Tudo o que a IA precisa saber sobre uma conversa: mensagens, lead, empresa e catálogo. */
+function contextoIA(c, lead) {
+  const telefone = c.telefone || "";
+  return {
+    mensagens: c.mensagens,
+    lead,
+    nomeContato: c.nomeContato || c.nome || "",
+    empresa: pedidos.dados.config?.empresa || {},
+    produtos: pedidos.dados.produtos,
+    condicoes: pedidos.dados.condicoes,
+    pais: lead?.pais || (telefone.startsWith("351") ? "Portugal" : "Brasil"),
+  };
+}
+
+/** Envia uma mensagem escrita pela IA e registra com a marca "ia" (aparece como ✨ IA no chat). */
+async function enviarComoIA(c, lead, texto) {
+  const enviada = await whatsapp.enviarParaJid(c.jid, texto, { daIA: true });
+  const msg = { id: enviada.id, direcao: "saida", texto, em: enviada.em, origem: "ia" };
+  conversas.registrar(c.jid, msg);
+  if (lead) {
+    await store.registrarMensagem(lead.id, msg);
+    transmitir("leads", { motivo: "mensagem", id: lead.id });
+  }
+  avisarConversas();
+}
+
+async function transferirParaHumano(c, lead, motivo) {
+  if (ia.config.mensagemTransferencia) await enviarComoIA(c, lead, ia.config.mensagemTransferencia).catch(() => {});
+  await store.atualizar(lead.id, { etapa: ETAPA_HUMANO });
+  await store.adicionarNota(lead.id, `IA passou para atendimento humano: ${motivo}`);
+  conversas.colocarNaFila(c.jid);
+  ia.registrarAtividade({ tipo: "transferiu", jid: c.jid, nome: lead.nome, texto: motivo });
+  transmitir("leads", { motivo: "etapa", id: lead.id });
+  transmitir("ia", { tipo: "transferiu", jid: c.jid, nome: lead.nome, motivo });
+  avisarConversas();
+}
+
+/**
+ * Atendimento automático: roda depois que o cliente para de escrever. Só age se o lead continua em
+ * "Em atendimento IA", ninguém da equipe respondeu há pouco e o limite por hora não estourou.
+ */
+async function atenderComIA(jid) {
+  const c = conversas.obter(jid);
+  const lead = c && leadDaConversa(c.jid, c.telefone);
+  if (!c || !lead || !ia.config.autoAtendimento || lead.etapa !== ETAPA_IA || lead.optOut || whatsapp.status !== "conectado") return;
+  if (c.mensagens.at(-1)?.direcao !== "entrada") return; // já foi respondido
+  const agora = Date.now();
+  // Mensagem enviada por uma pessoa (pelo CRM ou pelo celular) — follow-up e IA não contam.
+  const automaticas = new Map((lead.mensagens || []).filter((m) => m.id && m.origem).map((m) => [m.id, m.origem]));
+  const ehAutomatica = (m) => ["ia", "followup"].includes(m.origem || automaticas.get(m.id));
+  const humanoRecente = c.mensagens.some((m) => m.direcao === "saida" && !ehAutomatica(m) && agora - new Date(m.em).getTime() < ia.config.humanoAssumeMinutos * 60_000);
+  if (humanoRecente) {
+    ia.registrarAtividade({ tipo: "aguardou", jid, nome: lead.nome, texto: "Alguém da equipe respondeu há pouco: a IA não interferiu." });
+    return;
+  }
+  const daIAnaHora = c.mensagens.filter((m) => m.origem === "ia" && agora - new Date(m.em).getTime() < 3_600_000).length;
+  if (daIAnaHora >= ia.config.maxRespostasPorHora) return transferirParaHumano(c, lead, `limite de ${ia.config.maxRespostasPorHora} respostas automáticas por hora atingido`);
+  let decisao;
+  try {
+    decisao = await ia.decidir(contextoIA(c, lead));
+  } catch (e) {
+    console.error("IA:", e.message);
+    // Sem resposta da IA, o cliente não pode ficar esperando: vai para a equipe.
+    return transferirParaHumano(c, lead, `IA indisponível (${e.message})`);
+  }
+  // O cliente pode ter escrito de novo, ou alguém respondido, enquanto a IA pensava.
+  if (conversas.obter(jid)?.mensagens.at(-1)?.direcao !== "entrada" || leadDaConversa(c.jid, c.telefone)?.etapa !== ETAPA_IA) return;
+  if (decisao.acao === "transferir") return transferirParaHumano(c, lead, decisao.motivo);
+  try {
+    await enviarComoIA(c, lead, decisao.resposta);
+  } catch (e) {
+    return transferirParaHumano(c, lead, `falha ao enviar a resposta da IA (${e.message})`);
+  }
+  conversas.darBaixa(c.jid); // atendida pela IA: sai da fila (volta se o cliente escrever de novo)
+  ia.registrarAtividade({ tipo: "respondeu", jid, nome: lead.nome, texto: decisao.resposta });
+  transmitir("ia", { tipo: "respondeu", jid, nome: lead.nome });
+  avisarConversas();
+}
 
 const app = express();
 app.disable("x-powered-by");
@@ -141,6 +232,21 @@ if (SENHA) {
 const assincrono = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 app.get("/api/versao", (_req, res) => res.json({ data: VERSAO }));
+
+app.get("/api/ia", (_req, res) => res.json({ data: ia.publico() }));
+app.patch("/api/ia", assincrono(async (req, res) => {
+  const data = await ia.atualizar(req.body);
+  transmitir("ia", { tipo: "config" });
+  res.json({ data });
+}));
+app.post("/api/ia/testar", assincrono(async (_req, res) => res.json({ data: await ia.testar() })));
+app.post("/api/conversas/:jid/ia/:acao(sugerir|resumir)", assincrono(async (req, res) => {
+  const c = conversas.obter(req.params.jid);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  if (!c.mensagens.length) throw new ErroValidacao("Ainda não há mensagens nesta conversa");
+  const ctx = { ...contextoIA(c, leadDaConversa(c.jid, c.telefone)), orientacao: req.body?.orientacao };
+  res.json({ data: req.params.acao === "sugerir" ? await ia.sugerir(ctx) : await ia.resumir(ctx) });
+}));
 
 // Painel de resultados. ?dias=7|30|90|365; sem dias (ou 0) = desde o começo.
 app.get("/api/painel", (req, res) => {
@@ -713,6 +819,7 @@ app.use(express.static(path.join(raiz, "public")));
 
 app.use((erro, _req, res, _next) => {
   if (erro instanceof ErroValidacao) return res.status(400).json({ error: { message: erro.message } });
+  if (erro instanceof ErroIA) return res.status(502).json({ error: { message: erro.message } });
   if (erro.type === "entity.parse.failed") return res.status(400).json({ error: { message: "JSON inválido" } });
   console.error(erro);
   res.status(500).json({ error: { message: "Erro interno" } });

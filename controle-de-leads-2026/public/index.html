@@ -252,6 +252,7 @@
                   <button type="button" class="botao-emoji" data-emoji-para="cv-texto" title="Emojis" aria-label="Inserir emoji" aria-haspopup="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.6" /></svg></button>
                   <div class="sugestoes" id="cv-sugestoes" role="listbox" hidden></div>
                 </div>
+                <button type="button" class="icone-btn ia-sugerir" id="cv-sugerir" title="Sugerir resposta com IA (se houver texto na caixa, ele vira a orientação)" aria-label="Sugerir resposta com IA"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg></button>
                 <label class="icone-btn anexar" title="Anexar foto, vídeo, áudio ou documento">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></svg>
                   <input type="file" id="cv-arquivo" hidden />
@@ -374,6 +375,58 @@
           <div class="lista" id="lista-proximos"></div>
         </div>
 
+        <div class="wa-cartao bloco largo" id="secao-ia">
+          <div class="bloco-topo">
+            <div>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>Assistente de IA (Claude)</h2>
+              <p>Sugere respostas e resume conversas na aba <strong>Conversas</strong> (botões ✨). Ligado o atendimento automático, responde sozinho os leads em <strong>Em atendimento IA</strong> e passa para <strong>Atendimento Humano</strong> quando não deve responder.</p>
+            </div>
+            <span class="selo" id="ia-selo">Sem chave</span>
+          </div>
+          <form id="form-ia" class="ia-form" autocomplete="off">
+            <div class="grade">
+              <label class="campo">Chave da API da Anthropic
+                <input type="password" name="chave" id="ia-chave" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+                <small class="dica" id="ia-chave-dica">Crie em console.anthropic.com › API Keys. O uso é cobrado pela Anthropic na sua conta.</small>
+              </label>
+              <label class="campo">Modelo
+                <select name="modelo" id="ia-modelo"></select>
+              </label>
+            </div>
+            <label class="campo">Sobre a empresa e instruções para a IA
+              <textarea name="instrucoes" rows="6" maxlength="8000" placeholder="Ex.: Somos a Verde Soluções, sistemas para clínicas. Atendemos de seg. a sex., 9h às 18h. Implantação em até 7 dias. Não fazemos desconto acima de 10%. Sempre ofereça uma demonstração gratuita."></textarea>
+              <small class="dica">A IA usa só isto, os produtos e as condições de pagamento cadastrados em Pedidos. O que não estiver aqui ela não inventa: diz que vai confirmar com a equipe.</small>
+            </label>
+            <label class="interruptor">
+              <input type="checkbox" name="autoAtendimento" id="ia-auto" />
+              <span class="trilho"></span>
+              <span>Atendimento automático para os leads na etapa <strong>Em atendimento IA</strong></span>
+            </label>
+            <div class="grade ia-auto-opcoes">
+              <label class="campo">Mensagem ao passar para a equipe
+                <input name="mensagemTransferencia" maxlength="500" />
+              </label>
+              <label class="campo">Esperar o cliente terminar de escrever (segundos)
+                <input name="esperaSegundos" type="number" min="0" max="300" />
+              </label>
+              <label class="campo">Ficar quieta se alguém da equipe respondeu nos últimos (minutos)
+                <input name="humanoAssumeMinutos" type="number" min="0" max="1440" />
+              </label>
+              <label class="campo">Máximo de respostas por conversa a cada hora
+                <input name="maxRespostasPorHora" type="number" min="1" max="60" />
+              </label>
+            </div>
+            <div class="ia-botoes">
+              <button type="button" class="btn btn-secundario" id="ia-testar">Testar a chave</button>
+              <button type="submit" class="btn btn-primario">Salvar</button>
+            </div>
+          </form>
+          <details class="diagnostico" id="ia-atividade-bloco">
+            <summary>Atividade recente da IA</summary>
+            <div id="ia-atividade"></div>
+          </details>
+        </div>
+
         <div class="wa-cartao bloco largo" id="secao-regras">
           <div class="bloco-topo">
             <div>
@@ -394,6 +447,16 @@
       </div>
     </section>
   </main>
+
+  <!-- Resumo da conversa pela IA -->
+  <dialog class="modal modal-pequeno" id="modal-resumo" aria-labelledby="resumo-titulo">
+    <div class="modal-topo">
+      <h2 id="resumo-titulo">✨ Resumo da conversa</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo" id="resumo-corpo"></div>
+    <div class="modal-rodape" id="resumo-rodape"></div>
+  </dialog>
 
   <!-- Modal do lead (criar / ver / editar) -->
   <dialog id="modal" class="modal">

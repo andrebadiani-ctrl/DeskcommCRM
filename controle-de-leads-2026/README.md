@@ -116,6 +116,30 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
     follow-ups pendentes são cancelados. Também dá para marcar à mão no lead.
   - As regras de exemplo vêm **pausadas**: nada é enviado até você ativar uma regra.
   - Os follow-ups só saem com o WhatsApp conectado e o servidor ligado; enquanto isso eles esperam.
+- **Assistente de IA (Claude, da Anthropic)** — opcional; configure em *WhatsApp › Assistente de IA*:
+  - **Chave da API:** crie em console.anthropic.com › *API Keys* e cole no campo (ou defina a
+    variável `ANTHROPIC_API_KEY` no servidor). O uso é **cobrado pela Anthropic na sua conta**, por
+    volume de texto. Escolha o modelo: *Opus 5.5* (mais capaz, padrão), *Sonnet 5.5* (metade do
+    preço) ou *Haiku 5.5* (o mais barato). O botão *Testar a chave* confirma que está tudo certo.
+  - **Sobre a empresa e instruções:** horário, prazos, políticas, o que oferecer. A IA usa só isso,
+    os produtos e as condições de pagamento de *Pedidos*; o que não estiver lá ela não inventa.
+  - **✨ Sugerir resposta** (na conversa, ao lado do 📎): escreve um rascunho para você revisar e
+    enviar. Se você digitar uma orientação antes (ex.: "oferecer a demonstração"), ela segue.
+  - **✨ Resumo** (no topo da conversa): o que o cliente quer, o que ficou pendente, próximo passo e
+    etapa sugerida — com botões para salvar nas observações do lead e mover de etapa.
+  - **Atendimento automático** (desligado por padrão): para os leads na etapa **Em atendimento IA**,
+    a IA espera o cliente terminar de escrever e responde sozinha. Quando o cliente pede uma pessoa,
+    quer negociar ou fechar, manda áudio/foto, ou a pergunta não está coberta, ela **passa para a
+    equipe**: envia a mensagem de transferência, move o lead para *Atendimento Humano*, anota o
+    motivo, coloca a conversa na fila e avisa na tela (com som). Proteções: fica quieta se alguém da
+    equipe respondeu há pouco (30 min, ajustável), no máximo 12 respostas por conversa por hora, não
+    fala com quem pediu *Não contatar*, e se a API falhar o cliente vai para a equipe em vez de ficar
+    sem resposta. As mensagens escritas pela IA aparecem com a marca **✨ IA**; o que ela fez fica
+    em *Atividade recente da IA*.
+  - **Privacidade:** para sugerir, resumir ou responder, o texto das últimas mensagens da conversa,
+    os dados do lead e o catálogo são enviados à API da Anthropic. Áudios, fotos e documentos não
+    são enviados (a IA só sabe que existem). A chave fica guardada em `data/ia.json` no servidor e
+    nunca aparece inteira na tela.
 - **Modo escuro** — botão ◐ no topo: *automático* (segue o modo do computador/celular) → *escuro* →
   *claro*. A escolha fica guardada naquele navegador.
 - **App instalável** — o sistema pode virar um "app" com ícone próprio, abrindo em janela sem barra

@@ -715,6 +715,7 @@
     caixa._ids = ids;
     caixa._chave = chave;
   }
+  const marcaIA = (m) => (m.origem === "ia" ? `<span class="msg-ia" title="Escrita e enviada pela IA">✨ IA</span> ` : "");
   const classeBalao = (m) => `msg ${m.direcao === "saida" ? "saida" : "entrada"}${m.midia ? " com-midia" : ""}`;
 
   function renderMensagens(lead) {
@@ -722,7 +723,7 @@
     const pertoDoFim = caixa.scrollHeight - caixa.scrollTop - caixa.clientHeight < 80;
     const mudouDeLead = caixa._chave !== lead.id;
     renderBaloes(caixa, lead.id, lead.mensagens || [], (lista) =>
-      lista.map((m) => `<div class="${classeBalao(m)}" data-msg="${esc(m.id || "")}">${conteudoDaMensagem(m, lead.mensagens, lead.nome)}<time>${new Date(m.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time></div>`).join(""),
+      lista.map((m) => `<div class="${classeBalao(m)}" data-msg="${esc(m.id || "")}">${conteudoDaMensagem(m, lead.mensagens, lead.nome)}<time>${marcaIA(m)}${new Date(m.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time></div>`).join(""),
       `<div class="sem-msg">Nenhuma mensagem trocada com este lead ainda.</div>`);
     if (mudouDeLead || pertoDoFim) caixa.scrollTop = caixa.scrollHeight;
     atualizarAvisoWhatsApp(lead);
@@ -1441,6 +1442,7 @@
       ? `<div class="cv-lead ${CLASSE_ETAPA[lead.etapa] || ""}">
           <span class="cv-lead-rotulo">Lead</span>
           <select class="etapa" id="cv-mover" aria-label="Etapa do funil">${opcoesEtapa(lead.etapa)}</select>
+          ${lead.etapa === "Em atendimento IA" && iaEstado.dados?.autoAtendimento ? `<span class="cv-ia-ativa" title="A IA responde sozinha enquanto o lead estiver nesta etapa">✨ IA atendendo</span>` : ""}
           <button type="button" class="btn btn-secundario mini" data-cv-abrir-lead="${lead.id}">Abrir lead</button>
           <button type="button" class="btn btn-secundario mini" data-novo-pedido="${lead.id}">+ Pedido</button>
         </div>`
@@ -1459,6 +1461,7 @@
       <span class="avatar${lead ? " " + (CLASSE_ETAPA[lead.etapa] || "") : ""}">${esc(iniciais(nome))}</span>
       <div class="cv-quem"><strong>${esc(nome)}</strong><span>${esc(numero)}${lead && lead.nome !== nome ? ` · lead: ${esc(lead.nome)}` : ""}</span></div>
       <button type="button" class="icone-btn cv-fixar${c.fixada ? " ativo" : ""}" id="cv-fixar" aria-pressed="${!!c.fixada}" title="${c.fixada ? "Desafixar" : "Fixar no topo da lista"}">${ICONE_PIN}</button>
+      <button type="button" class="btn btn-fantasma mini cv-resumo" id="cv-resumo" title="Resumo da conversa feito pela IA">✨ Resumo</button>
       ${atendimento}
       ${acoes}`;
   }
@@ -1473,7 +1476,7 @@
         const rotulo = rotuloDoDia(m);
         const separador = rotulo !== dia ? `<div class="cv-dia"><span>${esc((dia = rotulo))}</span></div>` : "";
         const responder = m.id ? `<button type="button" class="msg-responder" data-responder="${esc(m.id)}" title="Responder" aria-label="Responder esta mensagem"><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5" /><path d="M4 12h10a6 6 0 0 1 6 6v1" /></svg></button>` : "";
-        return `${separador}<div class="${classeBalao(m)}" data-msg="${esc(m.id || "")}">${responder}${conteudoDaMensagem(m, estado.conversaDados.mensagens, nomeConversa(estado.conversaDados))}<time>${new Date(m.em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time></div>`;
+        return `${separador}<div class="${classeBalao(m)}" data-msg="${esc(m.id || "")}">${responder}${conteudoDaMensagem(m, estado.conversaDados.mensagens, nomeConversa(estado.conversaDados))}<time>${marcaIA(m)}${new Date(m.em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time></div>`;
       }).join("");
     }, `<div class="sem-msg">Sem mensagens nesta conversa ainda.</div>`);
     if (rolar || pertoDoFim) caixa.scrollTop = caixa.scrollHeight;
@@ -1927,6 +1930,7 @@
     const pedido = e.target.closest("[data-novo-pedido]");
     if (pedido) return abrirPedido(null, { leadId: pedido.dataset.novoPedido });
     if (e.target.closest("#cv-adicionar")) return adicionarLeadDaConversa();
+    if (e.target.closest("#cv-resumo")) return abrirResumo();
     const abrir = e.target.closest("[data-cv-abrir-lead]");
     if (abrir) abrirModal(abrir.dataset.cvAbrirLead);
   });
@@ -3380,6 +3384,164 @@
     }
   });
 
+  // ---------- assistente de IA ----------
+  const iaEstado = { dados: null };
+  const iaPronta = () => !!iaEstado.dados?.configurada;
+  async function carregarIA() {
+    iaEstado.dados = await api("GET", "/api/ia");
+    renderIA();
+    if (estado.aba === "conversas" && estado.conversaDados) renderCabecalhoConversa();
+  }
+
+  const ROTULO_ATIVIDADE = { respondeu: "✨ respondeu", transferiu: "➜ passou para a equipe", aguardou: "⏸ não interferiu" };
+  function renderIA() {
+    const d = iaEstado.dados;
+    if (!d) return;
+    const form = $("#form-ia");
+    const selo = $("#ia-selo");
+    selo.textContent = !d.configurada ? "Sem chave" : d.autoAtendimento ? "Atendimento automático ligado" : "Pronta (só sugestões)";
+    selo.className = "selo" + (d.configurada ? (d.autoAtendimento ? " on" : " espera") : "");
+    $("#ia-modelo").innerHTML = d.modelos.map((m) => `<option value="${m.id}"${m.id === d.modelo ? " selected" : ""}>${esc(m.nome)}</option>`).join("");
+    $("#ia-chave").placeholder = d.configurada ? `•••• ${d.chaveFinal} (deixe em branco para manter)` : "sk-ant-…";
+    $("#ia-chave-dica").textContent = d.chaveDoAmbiente
+      ? "Usando a chave da variável ANTHROPIC_API_KEY do servidor. Uma chave digitada aqui passa a valer no lugar dela."
+      : "Crie em console.anthropic.com › API Keys. O uso é cobrado pela Anthropic na sua conta.";
+    // Não sobrescreve o que a pessoa está digitando.
+    if (!form.contains(document.activeElement)) {
+      form.instrucoes.value = d.instrucoes;
+      form.autoAtendimento.checked = d.autoAtendimento;
+      form.mensagemTransferencia.value = d.mensagemTransferencia;
+      form.esperaSegundos.value = d.esperaSegundos;
+      form.humanoAssumeMinutos.value = d.humanoAssumeMinutos;
+      form.maxRespostasPorHora.value = d.maxRespostasPorHora;
+    }
+    $(".ia-auto-opcoes").classList.toggle("apagado", !form.autoAtendimento.checked);
+    $("#ia-atividade").innerHTML = d.atividade.length
+      ? `<ul class="ia-atividade">${d.atividade.map((a) => `<li><time>${new Date(a.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time><b>${esc(a.nome || "")}</b> ${ROTULO_ATIVIDADE[a.tipo] || esc(a.tipo)}${a.texto ? `<span>${esc(a.texto)}</span>` : ""}</li>`).join("")}</ul>`
+      : `<p class="dica">Nada ainda. Quando o atendimento automático agir, aparece aqui.</p>`;
+  }
+
+  $("#form-ia").addEventListener("change", (e) => e.target.name === "autoAtendimento" && $(".ia-auto-opcoes").classList.toggle("apagado", !e.target.checked));
+  $("#form-ia").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.currentTarget;
+    const corpo = {
+      modelo: f.modelo.value,
+      instrucoes: f.instrucoes.value,
+      autoAtendimento: f.autoAtendimento.checked,
+      mensagemTransferencia: f.mensagemTransferencia.value,
+      esperaSegundos: Number(f.esperaSegundos.value),
+      humanoAssumeMinutos: Number(f.humanoAssumeMinutos.value),
+      maxRespostasPorHora: Number(f.maxRespostasPorHora.value),
+    };
+    if (f.chave.value.trim()) corpo.chave = f.chave.value.trim();
+    try {
+      iaEstado.dados = await api("PATCH", "/api/ia", corpo);
+      f.chave.value = "";
+      document.activeElement?.blur();
+      renderIA();
+      toast(corpo.autoAtendimento ? "Assistente salvo. Atendimento automático ligado para a etapa Em atendimento IA." : "Assistente de IA salvo.");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  $("#ia-testar").addEventListener("click", async (e) => {
+    const botao = e.currentTarget;
+    const chave = $("#ia-chave").value.trim();
+    botao.disabled = true;
+    botao.textContent = "Testando…";
+    try {
+      if (chave) iaEstado.dados = await api("PATCH", "/api/ia", { chave, modelo: $("#ia-modelo").value });
+      const r = await api("POST", "/api/ia/testar");
+      $("#ia-chave").value = "";
+      renderIA();
+      toast(`A chave funciona! O ${$("#ia-modelo").selectedOptions[0]?.textContent.split(" —")[0] || r.modelo} respondeu.`);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      botao.disabled = false;
+      botao.textContent = "Testar a chave";
+    }
+  });
+
+  function precisaConfigurarIA() {
+    if (iaPronta()) return false;
+    toast("Cadastre a chave da API em WhatsApp › Assistente de IA para usar a IA.", true);
+    return true;
+  }
+
+  // ✨ Sugerir: o texto já digitado vira a orientação ("ofereça o plano anual") e é trocado pelo rascunho.
+  $("#cv-sugerir").addEventListener("click", async (e) => {
+    if (!estado.conversaAberta || precisaConfigurarIA()) return;
+    const botao = e.currentTarget;
+    const campo = $("#cv-texto");
+    const orientacao = campo.value.trim();
+    botao.disabled = true;
+    botao.classList.add("pensando");
+    campo.placeholder = "A IA está escrevendo uma sugestão…";
+    try {
+      const { resposta } = await api("POST", `/api/conversas/${jidUrl(estado.conversaAberta)}/ia/sugerir`, orientacao ? { orientacao } : {});
+      campo.value = resposta;
+      campo.focus();
+      campo.setSelectionRange(campo.value.length, campo.value.length);
+      toast("Sugestão pronta: revise e envie.");
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      botao.disabled = false;
+      botao.classList.remove("pensando");
+      campo.placeholder = "Escreva uma mensagem… (digite / para respostas rápidas)";
+    }
+  });
+
+  // ✨ Resumo da conversa (com próximo passo e etapa sugerida)
+  const modalResumo = $("#modal-resumo");
+  $$("[data-fechar]", modalResumo).forEach((b) => b.addEventListener("click", () => modalResumo.close()));
+  modalResumo.addEventListener("click", (e) => e.target === modalResumo && modalResumo.close());
+  async function abrirResumo() {
+    if (!estado.conversaAberta || precisaConfigurarIA()) return;
+    const jid = estado.conversaAberta;
+    $("#resumo-corpo").innerHTML = `<div class="resumo-carregando"><div class="carregando"></div><span>Lendo a conversa…</span></div>`;
+    $("#resumo-rodape").innerHTML = "";
+    modalResumo.showModal();
+    let r;
+    try {
+      r = await api("POST", `/api/conversas/${jidUrl(jid)}/ia/resumir`);
+    } catch (err) {
+      $("#resumo-corpo").innerHTML = `<p class="resumo-erro">${esc(err.message)}</p>`;
+      return;
+    }
+    const c = estado.conversaDados;
+    const lead = c?.lead && estado.leads.find((l) => l.id === c.lead.id);
+    const linhas = r.resumo.split("\n").map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
+    $("#resumo-corpo").innerHTML = `<ul class="resumo-lista">${linhas.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>
+      <h3 class="resumo-sub">Próximo passo</h3><p>${esc(r.proximoPasso)}</p>
+      ${r.etapaSugerida ? `<h3 class="resumo-sub">Etapa sugerida</h3><p><span class="etapa-chip ${CLASSE_ETAPA[r.etapaSugerida] || ""}">${esc(r.etapaSugerida)}</span>${lead ? (lead.etapa === r.etapaSugerida ? " <small>(já está nela)</small>" : ` <small>(hoje: ${esc(lead.etapa)})</small>`) : ""}</p>` : ""}
+      <p class="dica">Resumo feito pela IA a partir das últimas mensagens — confira antes de usar.</p>`;
+    const textoNota = `Resumo da conversa (IA): ${linhas.join(" ")} Próximo passo: ${r.proximoPasso}`;
+    $("#resumo-rodape").innerHTML = lead
+      ? `${r.etapaSugerida && lead.etapa !== r.etapaSugerida ? `<button type="button" class="btn btn-secundario" id="resumo-mover">Mover para “${esc(r.etapaSugerida)}”</button>` : ""}
+         <span class="espaco"></span><button type="button" class="btn btn-primario" id="resumo-salvar">Salvar nas observações do lead</button>`
+      : `<span class="dica">Adicione a conversa como lead para guardar o resumo.</span><span class="espaco"></span><button type="button" class="btn btn-secundario" data-fechar-resumo>Fechar</button>`;
+    $("#resumo-rodape").onclick = async (e) => {
+      if (e.target.closest("[data-fechar-resumo]")) return modalResumo.close();
+      try {
+        if (e.target.closest("#resumo-salvar")) {
+          await api("POST", `/api/leads/${lead.id}/notas`, { texto: textoNota.slice(0, 1000) });
+          toast("Resumo salvo nas observações do lead.");
+          e.target.closest("#resumo-salvar").disabled = true;
+        }
+        if (e.target.closest("#resumo-mover")) {
+          await api("PATCH", `/api/leads/${lead.id}`, { etapa: r.etapaSugerida });
+          toast(`${lead.nome} foi para “${r.etapaSugerida}”.`);
+          e.target.closest("#resumo-mover").remove();
+        }
+      } catch (err) {
+        toast(err.message, true);
+      }
+    };
+  }
+
   // ---------- tema (automático / claro / escuro) ----------
   const TEMAS = {
     auto: { proximo: "escuro", nome: "automático (segue o sistema)", icone: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" /></svg>` },
@@ -3469,6 +3631,18 @@
     fonte.addEventListener("conversas", agendarConversas);
     fonte.addEventListener("pedidos", () => carregarPedidos().catch(() => {}));
     fonte.addEventListener("tarefas", () => carregarTarefas().catch(() => {}));
+    fonte.addEventListener("ia", (e) => {
+      const d = JSON.parse(e.data);
+      carregarIA().catch(() => {});
+      if (d.tipo !== "transferiu") return;
+      // A IA passou o cliente para a equipe: precisa de alguém agora.
+      toast(`✨ A IA passou ${d.nome} para o atendimento humano: ${d.motivo}`);
+      tocarSom();
+      notificar(`${d.nome} precisa de atendimento`, `A IA passou para a equipe: ${d.motivo}`, `ia-${d.jid}`, () => {
+        trocarAba("conversas");
+        abrirConversa(d.jid);
+      });
+    });
     // O Painel soma tudo: qualquer mudança em leads, pedidos ou conversas o atualiza.
     for (const tipo of ["leads", "pedidos", "conversas"]) fonte.addEventListener(tipo, () => estado.aba === "resultados" && carregarPainel());
     fonte.addEventListener("lembrete", (e) => mostrarLembrete(JSON.parse(e.data)));
@@ -3499,7 +3673,7 @@
     try {
       const [leads, config, wa] = await Promise.all([api("GET", "/api/leads"), api("GET", "/api/config"), api("GET", "/api/whatsapp")]);
       Object.assign(estado, { leads, config, whatsapp: wa });
-      await Promise.all([carregarConversas(), carregarPedidos(), carregarTarefas(), mostrarVersao()]);
+      await Promise.all([carregarConversas(), carregarPedidos(), carregarTarefas(), mostrarVersao(), carregarIA()]);
       const atrasadas = listaTarefas.filter((t) => situacaoTarefa(t) === "atrasada").length;
       if (atrasadas) toast(`Você tem ${atrasadas} ${atrasadas === 1 ? "tarefa atrasada" : "tarefas atrasadas"} — veja no botão de tarefas, no topo`);
     } catch (err) {

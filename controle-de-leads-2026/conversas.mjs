@@ -108,6 +108,10 @@ export class Conversas {
           }
         }
       }
+      if (msg.origem && !repetida.origem) {
+        repetida.origem = String(msg.origem).slice(0, 20);
+        mudou = true;
+      }
       if (msg.citacao?.id && !repetida.citacao) {
         repetida.citacao = { id: String(msg.citacao.id).slice(0, 100), texto: String(msg.citacao.texto || "").slice(0, 300) };
         mudou = true;
@@ -117,6 +121,7 @@ export class Conversas {
     }
     const nova_ = { id: msg.id || "", direcao: msg.direcao, texto: msg.texto || "", em: msg.em };
     if (msg.midia) nova_.midia = msg.midia;
+    if (msg.origem) nova_.origem = String(msg.origem).slice(0, 20);
     if (msg.citacao?.id) nova_.citacao = { id: String(msg.citacao.id).slice(0, 100), texto: String(msg.citacao.texto || "").slice(0, 300) };
     c.mensagens.push(nova_);
     c.mensagens.sort((a, b) => a.em.localeCompare(b.em));
