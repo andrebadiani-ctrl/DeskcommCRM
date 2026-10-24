@@ -1,5 +1,6 @@
 node_modules/
 data/
+data-demonstracao/
 # o .gitignore da raiz ignora package-lock.json (o repo principal usa pnpm); este app usa npm
 !package-lock.json
 senha.txt

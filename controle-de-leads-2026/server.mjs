@@ -5,18 +5,24 @@ import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { ErroValidacao, Store } from "./store.mjs";
+import { Conversas } from "./conversas.mjs";
+import { ErroValidacao, Store, chaveTelefone } from "./store.mjs";
 import { Followups } from "./followups.mjs";
 import { WhatsApp } from "./whatsapp.mjs";
+import { WhatsAppSimulado } from "./whatsapp-simulado.mjs";
 
 const raiz = path.dirname(fileURLToPath(import.meta.url));
 const PORTA = Number(process.env.PORT || 3000);
-const DADOS = process.env.DATA_DIR || path.join(raiz, "data");
+// O modo demonstração guarda tudo à parte, para nunca misturar com os dados reais.
+const DADOS = process.env.DATA_DIR || path.join(raiz, process.env.WA_SIMULADO === "1" ? "data-demonstracao" : "data");
 const SENHA = process.env.APP_PASSWORD || "";
 
 const store = new Store(DADOS);
 await store.carregar();
-const whatsapp = new WhatsApp(DADOS);
+const conversas = new Conversas(DADOS);
+await conversas.carregar();
+// WA_SIMULADO=1: modo demonstração, sem celular (ver whatsapp-simulado.mjs).
+const whatsapp = process.env.WA_SIMULADO === "1" ? new WhatsAppSimulado() : new WhatsApp(DADOS);
 
 // ---- eventos em tempo real (Server-Sent Events) ----
 const clientes = new Set();
@@ -28,23 +34,49 @@ whatsapp.on("estado", (estado) => transmitir("whatsapp", estado));
 
 const followups = new Followups(store, whatsapp, (id) => transmitir("leads", { motivo: "followup", id }));
 
-// Mensagem recebida: registra no lead do mesmo telefone ou cria um lead novo.
-whatsapp.on("mensagem", async ({ telefone, nome, texto, em }) => {
+// A sincronização inicial manda centenas de eventos de uma vez: avisa as telas no máximo 2x/s.
+let avisoConversas = null;
+function avisarConversas() {
+  if (avisoConversas) return;
+  avisoConversas = setTimeout(() => {
+    avisoConversas = null;
+    transmitir("conversas", {});
+  }, 500);
+}
+
+/** Lead ligado a uma conversa: pelo JID gravado no lead ou pelo mesmo telefone. */
+function leadDaConversa(jid, telefone) {
+  return store.listar().find((l) => l.whatsappJid === jid) || (telefone ? store.porTelefone(telefone) : undefined);
+}
+
+whatsapp.on("conversa", (dados) => {
+  conversas.atualizarDados(dados.jid, dados);
+  avisarConversas();
+});
+
+// Toda mensagem (recebida, enviada pelo celular ou pelo CRM, ou do histórico) entra na caixa de
+// entrada. Se a conversa é de um lead, entra também no histórico dele.
+whatsapp.on("mensagem", async ({ jid, id, fromMe, telefone, nome, texto, em, nova, historico }) => {
   try {
-    let lead = store.porTelefone(telefone);
-    if (!lead) {
-      if (!store.config.autoCriarLeads) return;
+    const msg = { id, direcao: fromMe ? "saida" : "entrada", texto, em };
+    const inedita = conversas.registrar(jid, { ...msg, nome, telefone }, { nova });
+    avisarConversas();
+    if (!inedita || historico) return; // histórico antigo só vai para o lead quando ele é ligado
+
+    let lead = leadDaConversa(jid, telefone);
+    if (!lead && !fromMe && nova && store.config.autoCriarLeads) {
       const pais = telefone.startsWith("55") ? "Brasil" : telefone.startsWith("351") ? "Portugal" : "";
       lead = await store.criar({
-        nome: nome || `+${telefone}`,
-        telefone: `+${telefone}`,
+        nome: nome || (telefone ? `+${telefone}` : "Contato do WhatsApp"),
+        telefone: telefone ? `+${telefone}` : "",
         pais,
+        whatsappJid: jid,
         etapa: "Novo Lead",
         observacoes: "Lead criado automaticamente a partir de uma mensagem no WhatsApp.",
       });
     }
-    const msg = { direcao: "entrada", texto, em };
-    followups.aoReceberMensagem(lead, msg); // resposta do lead cancela follow-ups; "PARAR" descadastra
+    if (!lead) return;
+    if (!fromMe) followups.aoReceberMensagem(lead, msg); // resposta do lead cancela follow-ups; "PARAR" descadastra
     await store.registrarMensagem(lead.id, msg);
     transmitir("leads", { motivo: "mensagem", id: lead.id });
   } catch (e) {
@@ -73,7 +105,10 @@ const assincrono = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 app.get("/api/leads", (_req, res) => res.json({ data: store.listar() }));
 
 app.post("/api/leads", assincrono(async (req, res) => {
-  const lead = await store.criar(req.body);
+  let lead = await store.criar(req.body);
+  // Lead criado a partir de uma conversa: traz o histórico dela.
+  const conversa = lead.whatsappJid && conversas.obter(lead.whatsappJid);
+  if (conversa) lead = await store.importarMensagens(lead.id, conversa.mensagens);
   transmitir("leads", { motivo: "criado", id: lead.id });
   res.status(201).json({ data: lead });
 }));
@@ -166,15 +201,91 @@ app.post("/api/leads/:id/whatsapp", assincrono(async (req, res) => {
   if (!lead) return res.status(404).json({ error: { message: "Lead não encontrado" } });
   const texto = String(req.body?.texto || "").trim().slice(0, 4000);
   if (!texto) throw new ErroValidacao("Mensagem vazia");
-  if (!lead.telefone) throw new ErroValidacao("Lead sem telefone");
+  if (!lead.telefone && !lead.whatsappJid) throw new ErroValidacao("Lead sem telefone");
+  let enviada;
   try {
-    await whatsapp.enviar(lead.telefone, texto, lead.pais);
+    enviada = await whatsapp.enviarParaLead(lead, texto);
   } catch (e) {
     return res.status(409).json({ error: { message: e.message } });
   }
-  const atualizado = await store.registrarMensagem(lead.id, { direcao: "saida", texto, em: new Date().toISOString() });
+  const msg = { id: enviada.id, direcao: "saida", texto, em: enviada.em };
+  conversas.registrar(enviada.jid, msg);
+  avisarConversas();
+  const atualizado = await store.registrarMensagem(lead.id, msg);
   transmitir("leads", { motivo: "mensagem", id: lead.id });
   res.json({ data: atualizado });
+}));
+
+// ---- caixa de entrada do WhatsApp ----
+function resumoLead(lead) {
+  return lead ? { id: lead.id, nome: lead.nome, etapa: lead.etapa } : null;
+}
+
+app.get("/api/conversas", (_req, res) => {
+  // Índices para achar o lead de cada conversa sem varrer a lista inteira a cada uma.
+  const porJid = new Map();
+  const porTelefone = new Map();
+  for (const l of store.listar()) {
+    if (l.whatsappJid) porJid.set(l.whatsappJid, l);
+    const chave = chaveTelefone(l.telefone);
+    if (chave && !porTelefone.has(chave)) porTelefone.set(chave, l);
+  }
+  const data = conversas.listar().map((c) => ({
+    ...c,
+    lead: resumoLead(porJid.get(c.jid) || (c.telefone ? porTelefone.get(chaveTelefone(c.telefone)) : undefined)),
+  }));
+  res.json({ data });
+});
+
+app.get("/api/conversas/:jid", (req, res) => {
+  const c = conversas.obter(req.params.jid);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  res.json({ data: { ...c, lead: resumoLead(leadDaConversa(c.jid, c.telefone)) } });
+});
+
+app.post("/api/conversas/:jid/lida", (req, res) => {
+  if (!conversas.marcarLida(req.params.jid)) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  avisarConversas();
+  res.status(204).end();
+});
+
+app.post("/api/conversas/:jid/mensagens", assincrono(async (req, res) => {
+  const c = conversas.obter(req.params.jid);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  const texto = String(req.body?.texto || "").trim().slice(0, 4000);
+  if (!texto) throw new ErroValidacao("Mensagem vazia");
+  let enviada;
+  try {
+    enviada = await whatsapp.enviarParaJid(c.jid, texto);
+  } catch (e) {
+    return res.status(409).json({ error: { message: e.message } });
+  }
+  const msg = { id: enviada.id, direcao: "saida", texto, em: enviada.em };
+  conversas.registrar(c.jid, msg);
+  const lead = leadDaConversa(c.jid, c.telefone);
+  if (lead) {
+    await store.registrarMensagem(lead.id, msg);
+    transmitir("leads", { motivo: "mensagem", id: lead.id });
+  }
+  avisarConversas();
+  res.json({ data: { ...c, lead: resumoLead(lead) } });
+}));
+
+// Liga a conversa a um lead que já existe (útil quando o WhatsApp esconde o número).
+app.post("/api/conversas/:jid/vincular", assincrono(async (req, res) => {
+  const c = conversas.obter(req.params.jid);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  const alvo = store.obter(String(req.body?.leadId || ""));
+  if (!alvo) return res.status(404).json({ error: { message: "Lead não encontrado" } });
+  // Uma conversa pertence a um lead só: tira de quem a tinha antes.
+  for (const outro of store.listar()) if (outro.whatsappJid === c.jid && outro.id !== alvo.id) await store.atualizar(outro.id, { whatsappJid: "" });
+  const dados = { whatsappJid: c.jid };
+  if (!alvo.telefone && c.telefone) dados.telefone = `+${c.telefone}`;
+  await store.atualizar(alvo.id, dados);
+  const lead = await store.importarMensagens(alvo.id, c.mensagens);
+  transmitir("leads", { motivo: "vinculado", id: lead.id });
+  avisarConversas();
+  res.json({ data: lead });
 }));
 
 app.get("/api/eventos", (req, res) => {

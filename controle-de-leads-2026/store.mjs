@@ -85,6 +85,11 @@ export function validarLead(entrada, { parcial = false, atual = {} } = {}) {
     if ("distrito" in entrada && d && !DISTRITOS.includes(d)) throw new ErroValidacao("Distrito inválido");
   }
 
+  if ("whatsappJid" in entrada) {
+    const jid = String(entrada.whatsappJid || "");
+    if (jid && !/^[\w.:-]+@(s\.whatsapp\.net|lid)$/.test(jid)) throw new ErroValidacao("Conversa do WhatsApp inválida");
+    saida.whatsappJid = jid;
+  }
   if ("optOut" in entrada) {
     if (typeof entrada.optOut !== "boolean") throw new ErroValidacao("optOut deve ser verdadeiro ou falso");
     saida.optOut = entrada.optOut;
@@ -183,7 +188,8 @@ export class Store extends EventEmitter {
     this.arquivo = path.join(dir, "leads.json");
     this.leads = [];
     this.config = {
-      autoCriarLeads: true,
+      // Desligado: quem vira lead é escolhido na aba Conversas. Ligado, todo número novo vira lead.
+      autoCriarLeads: false,
       janela: { inicio: 8, fim: 21 },
       respostasRapidas: respostasDeExemplo(),
       regrasFollowup: regrasDeExemplo(),
@@ -285,8 +291,28 @@ export class Store extends EventEmitter {
   async registrarMensagem(id, msg) {
     const lead = this.obter(id);
     if (!lead) return undefined;
+    // A mesma mensagem pode chegar duas vezes (o envio e o eco do WhatsApp): o id desduplica.
+    const existente = msg.id && (lead.mensagens || []).find((m) => m.id === msg.id);
+    if (existente) {
+      if (msg.origem && !existente.origem) {
+        existente.origem = msg.origem;
+        await this.salvar();
+      }
+      return lead;
+    }
     lead.mensagens = [...(lead.mensagens || []), msg].slice(-LIMITE_MENSAGENS);
     lead.atualizadoEm = new Date().toISOString();
+    await this.salvar();
+    return lead;
+  }
+
+  /** Traz o histórico de uma conversa do WhatsApp para o lead (sem duplicar). */
+  async importarMensagens(id, mensagens) {
+    const lead = this.obter(id);
+    if (!lead) return undefined;
+    const ids = new Set((lead.mensagens || []).map((m) => m.id).filter(Boolean));
+    const novas = mensagens.filter((m) => !m.id || !ids.has(m.id)).map(({ id: mid, direcao, texto, em }) => ({ id: mid, direcao, texto, em }));
+    lead.mensagens = [...(lead.mensagens || []), ...novas].sort((a, b) => a.em.localeCompare(b.em)).slice(-LIMITE_MENSAGENS);
     await this.salvar();
     return lead;
   }

@@ -26,6 +26,18 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
   - Mensagens recebidas entram no histórico do lead do mesmo telefone; número novo vira lead em
     *Novo Lead* automaticamente (pode desligar na aba WhatsApp).
   - A sessão fica salva em `data/whatsapp-auth/` e reconecta sozinha quando o servidor reinicia.
+- **Conversas (caixa de entrada do WhatsApp)**
+  - A aba *Conversas* mostra as conversas do seu WhatsApp (as recentes chegam quando você conecta;
+    as novas entram na hora), com busca e filtros *Todas / Não lidas / Sem lead / Leads*.
+  - Abra uma conversa para ler e responder (com respostas rápidas `/`).
+  - **+ Adicionar como lead**: abre o cadastro já com nome, telefone e país; ao salvar, o histórico
+    da conversa vai junto para o lead.
+  - **Vincular a lead existente**: liga a conversa a um lead já cadastrado (útil quando o WhatsApp
+    esconde o número do contato).
+  - Conversa que já é lead mostra a etapa do funil — dá para mudar a etapa ali mesmo, e o Kanban
+    acompanha. No lead, o link *Abrir em Conversas* leva direto ao chat.
+  - Grupos, status e canais não entram. Mensagens que você manda pelo celular também aparecem.
+  - A criação automática de lead para todo número novo vem **desligada** (ligue em *WhatsApp* se quiser).
 - **Respostas rápidas** — modelos de mensagem com atalho. No chat do lead, digite `/` (ex.: `/ola`)
   ou clique no atalho acima da caixa de texto. Aceitam variáveis: `{primeiro_nome}`, `{nome}`,
   `{empresa}`, `{cargo}`, `{cidade}`, `{etapa}`. Cadastre em *WhatsApp › Respostas rápidas*.
@@ -115,6 +127,7 @@ Coloque um proxy com HTTPS (Caddy, Nginx, Traefik) na frente se for expor na int
 | `DATA_DIR` | `./data` | Onde ficam `leads.json` e a sessão do WhatsApp |
 | `TZ` | `America/Sao_Paulo` | Fuso usado no carimbo das notas rápidas |
 | `WA_LOG_LEVEL` | `silent` | Log da biblioteca do WhatsApp (`info`, `debug`) |
+| `WA_SIMULADO` | *(vazia)* | `1` = modo demonstração: WhatsApp de mentira com conversas de exemplo, dados em `data-demonstracao/` |
 
 ## Como funciona
 
@@ -122,6 +135,8 @@ Coloque um proxy com HTTPS (Caddy, Nginx, Traefik) na frente se for expor na int
   real (`/api/eventos`, Server-Sent Events) e o frontend estático.
 - `store.mjs` — leads e configurações em `data/leads.json` (escrita atômica) + validação dos campos.
 - `followups.mjs` — agenda de follow-ups (regras por etapa + manuais) e o laço que envia os vencidos a cada 30 s.
+- `conversas.mjs` — caixa de entrada: conversas e últimas mensagens em `data/conversas.json`.
+- `whatsapp-simulado.mjs` — modo demonstração (`WA_SIMULADO=1`), sem celular.
 - `whatsapp.mjs` — conexão WhatsApp Web multi-dispositivo via [Baileys](https://github.com/WhiskeySockets/Baileys),
   com login por QR Code e reconexão automática.
 - `public/` — HTML, CSS e JavaScript puro (sem etapa de build).

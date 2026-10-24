@@ -12,12 +12,20 @@ import {
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
+import { ehConversaIndividual, telefoneDoJid } from "./conversas.mjs";
 import { digitos } from "./store.mjs";
 
 const logger = pino({ level: process.env.WA_LOG_LEVEL || "silent" });
 
 function textoDaMensagem(m) {
-  const msg = m.message || {};
+  // Mensagens temporárias / de visualização única vêm embrulhadas.
+  const bruta = m.message || {};
+  const msg =
+    bruta.ephemeralMessage?.message ||
+    bruta.viewOnceMessage?.message ||
+    bruta.viewOnceMessageV2?.message ||
+    bruta.documentWithCaptionMessage?.message ||
+    bruta;
   return (
     msg.conversation ||
     msg.extendedTextMessage?.text ||
@@ -143,24 +151,58 @@ export class WhatsApp extends EventEmitter {
       }
     });
 
-    sock.ev.on("messages.upsert", ({ messages, type }) => {
-      if (type !== "notify") return;
-      for (const m of messages) {
-        const jid = m.key?.remoteJid || "";
-        if (!jid || m.key.fromMe) continue;
-        if (jid.endsWith("@g.us") || jid === "status@broadcast" || jid.endsWith("@newsletter")) continue;
-        // Endereçamento por LID esconde o número; o Baileys expõe o número real em senderPn.
-        const jidNumero = jid.endsWith("@lid") ? m.key.senderPn || "" : jid;
-        const telefone = digitos(jidNumero.split("@")[0].split(":")[0]);
-        const texto = textoDaMensagem(m);
-        if (!telefone || !texto) continue;
-        this.emit("mensagem", {
-          telefone,
-          nome: m.pushName || "",
-          texto,
-          em: new Date(Number(m.messageTimestamp || Date.now() / 1000) * 1000).toISOString(),
-        });
+    const emData = (ts) => new Date(Number(ts || Date.now() / 1000) * 1000).toISOString();
+    const avisarMensagem = (m, tipo) => {
+      const jid = m.key?.remoteJid || "";
+      if (!ehConversaIndividual(jid)) return; // grupos, status e canais ficam de fora
+      const texto = textoDaMensagem(m);
+      if (!texto) return;
+      // Endereçamento por LID esconde o número; quando o WhatsApp manda, ele vem em senderPn.
+      const telefone = jid.endsWith("@lid") ? digitos(String(m.key.senderPn || "").split("@")[0].split(":")[0]) : telefoneDoJid(jid);
+      this.emit("mensagem", {
+        jid,
+        id: m.key.id || "",
+        fromMe: !!m.key.fromMe,
+        telefone,
+        nome: m.key.fromMe ? "" : m.pushName || "",
+        texto,
+        em: emData(m.messageTimestamp),
+        nova: tipo === "notify", // chegou agora (conta como não lida)
+        historico: tipo === "historico", // sincronização inicial: só preenche a caixa de entrada
+      });
+    };
+    const avisarContato = (c) => {
+      const nomeContato = c.name || "";
+      const nome = c.notify || c.verifiedName || "";
+      // O mesmo contato pode ter um JID de número e um anônimo (@lid): os dois apontam para o telefone.
+      const telefone = telefoneDoJid(c.jid || "") || telefoneDoJid(c.id || "");
+      for (const jid of new Set([c.id, c.lid, c.jid].filter(Boolean))) {
+        if (ehConversaIndividual(jid)) this.emit("conversa", { jid, nome, nomeContato, telefone });
       }
+    };
+    const avisarChat = (c) => {
+      if (!ehConversaIndividual(c.id)) return;
+      this.emit("conversa", {
+        jid: c.id,
+        nome: c.name || "",
+        naoLidas: typeof c.unreadCount === "number" ? c.unreadCount : undefined,
+        ultimaEm: c.conversationTimestamp ? emData(c.conversationTimestamp) : "",
+      });
+    };
+
+    // Ao conectar, o WhatsApp manda o histórico recente: conversas, contatos e mensagens.
+    sock.ev.on("messaging-history.set", ({ chats, contacts, messages }) => {
+      (contacts || []).forEach(avisarContato);
+      (chats || []).forEach(avisarChat);
+      (messages || []).forEach((m) => avisarMensagem(m, "historico"));
+    });
+    sock.ev.on("contacts.upsert", (cs) => cs.forEach(avisarContato));
+    sock.ev.on("contacts.update", (cs) => cs.forEach((c) => c.id && avisarContato(c)));
+    sock.ev.on("chats.upsert", (cs) => cs.forEach(avisarChat));
+
+    // notify = chegou agora; append = enviada por outro aparelho / pelo próprio CRM / histórico.
+    sock.ev.on("messages.upsert", ({ messages, type }) => {
+      for (const m of messages) avisarMensagem(m, type === "notify" ? "notify" : "append");
     });
   }
 
@@ -188,7 +230,20 @@ export class WhatsApp extends EventEmitter {
     if (numero.length < 10) throw new Error("Telefone inválido para WhatsApp");
     const [resultado] = await this.sock.onWhatsApp(numero);
     if (!resultado?.exists) throw new Error("Este número não tem WhatsApp");
-    await this.sock.sendMessage(resultado.jid, { text: texto });
-    return numero;
+    return this.enviarParaJid(resultado.jid, texto);
+  }
+
+  /** Envia para um lead: pela conversa ligada a ele, se houver; senão pelo telefone. */
+  enviarParaLead(lead, texto) {
+    if (lead.whatsappJid) return this.enviarParaJid(lead.whatsappJid, texto);
+    return this.enviar(lead.telefone, texto, lead.pais);
+  }
+
+  /** Envia direto para uma conversa (serve também para contatos anônimos @lid). */
+  async enviarParaJid(jid, texto) {
+    if (this.status !== "conectado" || !this.sock) throw new Error("WhatsApp não está conectado");
+    if (!ehConversaIndividual(jid)) throw new Error("Conversa inválida");
+    const enviada = await this.sock.sendMessage(jid, { text: texto });
+    return { jid, id: enviada?.key?.id || "", em: new Date().toISOString() };
   }
 }

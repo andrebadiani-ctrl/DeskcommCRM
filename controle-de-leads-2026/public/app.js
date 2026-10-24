@@ -28,8 +28,14 @@
     cidade: "",
     ordem: "criadoEm:desc",
     whatsapp: { status: "desconectado", qr: null, conta: null, erro: null },
-    config: { autoCriarLeads: true },
+    config: { autoCriarLeads: false },
     leadAberto: null,
+    conversas: [],
+    conversaAberta: null,
+    conversaDados: null,
+    cvFiltro: "todas",
+    cvBusca: "",
+    novoLeadJid: null,
     renderPendente: false,
   };
 
@@ -168,6 +174,7 @@
     if (estado.aba === "tabela") renderTabela();
     if (estado.aba === "kanban") renderKanban();
     if (estado.aba === "whatsapp") renderWhatsApp();
+    if (estado.aba === "conversas") renderConversas();
     renderPilula();
   }
 
@@ -176,8 +183,11 @@
     $("#painel-tabela").hidden = estado.aba !== "tabela";
     $("#painel-kanban").hidden = estado.aba !== "kanban";
     $("#painel-whatsapp").hidden = estado.aba !== "whatsapp";
-    $("#filtros").hidden = estado.aba === "whatsapp";
-    $("#btn-filtros").hidden = estado.aba === "whatsapp";
+    $("#painel-conversas").hidden = estado.aba !== "conversas";
+    const semFiltros = estado.aba === "whatsapp" || estado.aba === "conversas";
+    $("#filtros").hidden = semFiltros;
+    $("#btn-filtros").hidden = semFiltros;
+    $("#kpis").hidden = estado.aba === "conversas"; // a caixa de entrada usa a altura toda
   }
 
   function renderKpis() {
@@ -292,7 +302,7 @@
   function renderPilula() {
     const s = estado.whatsapp.status;
     const p = $("#wa-pilula");
-    p.textContent = PILULA_WA[s];
+    p.textContent = PILULA_WA[s] + (estado.whatsapp.simulado ? " (demonstração)" : "");
     p.className = "wa-pilula" + (s === "conectado" ? " on" : s === "desconectado" ? "" : " espera");
   }
 
@@ -571,20 +581,21 @@
         : `WhatsApp desconectado. <a href="#" data-ir-whatsapp>Conecte pelo QR Code</a> para enviar mensagens.`;
   }
 
-  function abrirModal(id = null, { focoWhatsApp = false } = {}) {
+  function abrirModal(id = null, { focoWhatsApp = false, preencher = null } = {}) {
     const lead = id ? estado.leads.find((l) => l.id === id) : null;
     estado.leadAberto = lead?.id || null;
+    estado.novoLeadJid = (!lead && preencher?.whatsappJid) || null;
     form.reset();
     $$(".invalido", form).forEach((el) => el.classList.remove("invalido"));
-    form.etapa.innerHTML = opcoesEtapa(lead?.etapa || "Novo Lead");
-    $("#modal-titulo").textContent = lead ? lead.nome : "Novo lead";
+    form.etapa.innerHTML = opcoesEtapa(lead?.etapa || preencher?.etapa || "Novo Lead");
+    $("#modal-titulo").textContent = lead ? lead.nome : estado.novoLeadJid ? "Novo lead do WhatsApp" : "Novo lead";
     $("#btn-excluir").hidden = !lead;
     $("#bloco-nota").hidden = !lead;
     $("#bloco-wa").hidden = !lead;
     $("#bloco-followups").hidden = !lead;
     $("#btn-salvar").textContent = lead ? "Salvar alterações" : "Criar lead";
 
-    const v = lead || { pais: "", criadoEm: new Date().toISOString() };
+    const v = lead || { pais: "", criadoEm: new Date().toISOString(), ...(preencher || {}) };
     for (const campo of ["nome", "email", "telefone", "cargo", "empresa", "cidade", "observacoes"]) form[campo].value = v[campo] || "";
     form.faturamentoMensal.value = lead ? v.faturamentoMensal || "" : "";
     form.criadoEm.value = paraInputData(v.criadoEm);
@@ -592,7 +603,8 @@
     atualizarCamposRegiao(v.pais, v.uf, v.distrito);
     if (lead) {
       renderMensagens(lead);
-      renderAtalhos();
+      compositorLead.renderAtalhos();
+      atualizarLinkConversa(lead);
       renderFollowupsLead(lead);
       prepararAgendamento();
     }
@@ -648,6 +660,7 @@
       distrito: pais === "Portugal" ? form.distrito.value : "",
       etapa: form.etapa.value,
     };
+    if (!atual && estado.novoLeadJid) dados.whatsappJid = estado.novoLeadJid; // veio da aba Conversas
     const botao = $("#btn-salvar");
     botao.disabled = true;
     try {
@@ -655,7 +668,11 @@
       substituir(lead);
       fecharModal();
       render();
-      toast(atual ? "Lead atualizado" : "Lead criado");
+      toast(atual ? "Lead atualizado" : dados.whatsappJid ? "Lead criado a partir da conversa" : "Lead criado");
+      if (dados.whatsappJid) {
+        await carregarConversas();
+        if (estado.conversaAberta === dados.whatsappJid) await abrirConversa(dados.whatsappJid, { rolar: false });
+      }
     } catch (err) {
       toast(err.message, true);
     } finally {
@@ -710,20 +727,6 @@
     }
   }
   $("#btn-wa-enviar").addEventListener("click", enviarWhatsApp);
-  $("#wa-texto").addEventListener("keydown", (e) => {
-    const sugestoes = caixaSugestoes.hidden ? [] : sugestoesVisiveis();
-    if (sugestoes.length && ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) {
-      e.preventDefault();
-      if (e.key === "Escape") return fecharSugestoes();
-      if (e.key === "Enter" || e.key === "Tab") {
-        return inserirNoChat(respostas().find((r) => r.id === sugestoes[sugestaoAtiva].dataset.usarResposta)?.texto || "");
-      }
-      sugestaoAtiva = (sugestaoAtiva + (e.key === "ArrowDown" ? 1 : -1) + sugestoes.length) % sugestoes.length;
-      sugestoes.forEach((s, i) => s.classList.toggle("ativa", i === sugestaoAtiva));
-      return;
-    }
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviarWhatsApp(); }
-  });
 
   // ---------- respostas rápidas e follow-ups ----------
   const ICONE_RELOGIO = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>`;
@@ -1031,54 +1034,75 @@
     });
   }
 
-  // ---- no modal do lead: respostas rápidas no chat ----
-  function inserirNoChat(texto) {
-    const lead = estado.leads.find((l) => l.id === estado.leadAberto);
-    const campo = $("#wa-texto");
-    campo.value = preencherVariaveis(texto, lead);
-    fecharSugestoes();
-    campo.focus();
-    campo.setSelectionRange(campo.value.length, campo.value.length);
+  // ---- caixa de mensagem com respostas rápidas ("/" ou atalhos): no lead e na aba Conversas ----
+  function ligarCompositor({ campo, caixa, atalhos, alvo, enviar }) {
+    let ativa = 0;
+    const fechar = () => {
+      caixa.hidden = true;
+      caixa.innerHTML = "";
+    };
+    const inserir = (id) => {
+      const r = respostas().find((x) => x.id === id);
+      if (!r) return;
+      campo.value = preencherVariaveis(r.texto, alvo());
+      fechar();
+      campo.focus();
+      campo.setSelectionRange(campo.value.length, campo.value.length);
+    };
+    campo.addEventListener("input", () => {
+      const m = campo.value.match(/^\/(\S*)$/);
+      if (!m) return fechar();
+      const termo = normalizar(m[1]);
+      const achadas = respostas().filter((r) => normalizar(r.atalho + " " + r.titulo).includes(termo)).slice(0, 8);
+      if (!achadas.length) return fechar();
+      ativa = 0;
+      caixa.innerHTML = achadas
+        .map((r, i) => `<div class="sugestao${i === 0 ? " ativa" : ""}" role="option" data-usar-resposta="${r.id}"><strong>/${esc(r.atalho)}</strong> ${esc(r.titulo || "")}<span>${esc(r.texto)}</span></div>`)
+        .join("");
+      caixa.hidden = false;
+    });
+    caixa.addEventListener("mousedown", (e) => {
+      const s = e.target.closest("[data-usar-resposta]");
+      if (!s) return;
+      e.preventDefault();
+      inserir(s.dataset.usarResposta);
+    });
+    campo.addEventListener("blur", () => setTimeout(fechar, 100));
+    campo.addEventListener("keydown", (e) => {
+      const itens = caixa.hidden ? [] : $$(".sugestao", caixa);
+      if (itens.length && ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) {
+        e.preventDefault();
+        if (e.key === "Escape") return fechar();
+        if (e.key === "Enter" || e.key === "Tab") return inserir(itens[ativa].dataset.usarResposta);
+        ativa = (ativa + (e.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
+        itens.forEach((s, i) => s.classList.toggle("ativa", i === ativa));
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        enviar();
+      }
+    });
+    atalhos.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-usar-resposta]");
+      if (b) inserir(b.dataset.usarResposta);
+    });
+    return {
+      renderAtalhos() {
+        atalhos.innerHTML = respostas()
+          .map((r) => `<button type="button" class="chip" data-usar-resposta="${r.id}" title="${esc(r.texto)}">${ICONE_RAIO}/${esc(r.atalho)}</button>`)
+          .join("");
+      },
+    };
   }
 
-  function renderAtalhos() {
-    $("#atalhos-respostas").innerHTML = respostas()
-      .map((r) => `<button type="button" class="chip" data-usar-resposta="${r.id}" title="${esc(r.texto)}">${ICONE_RAIO}/${esc(r.atalho)}</button>`)
-      .join("");
-  }
-  $("#atalhos-respostas").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-usar-resposta]");
-    if (b) inserirNoChat(respostas().find((r) => r.id === b.dataset.usarResposta)?.texto || "");
+  const compositorLead = ligarCompositor({
+    campo: $("#wa-texto"),
+    caixa: $("#sugestoes"),
+    atalhos: $("#atalhos-respostas"),
+    alvo: () => estado.leads.find((l) => l.id === estado.leadAberto),
+    enviar: enviarWhatsApp,
   });
-
-  let sugestaoAtiva = 0;
-  const caixaSugestoes = $("#sugestoes");
-  function fecharSugestoes() {
-    caixaSugestoes.hidden = true;
-    caixaSugestoes.innerHTML = "";
-  }
-  function sugestoesVisiveis() {
-    return $$(".sugestao", caixaSugestoes);
-  }
-  $("#wa-texto").addEventListener("input", (e) => {
-    const m = e.target.value.match(/^\/(\S*)$/);
-    if (!m) return fecharSugestoes();
-    const termo = normalizar(m[1]);
-    const achadas = respostas().filter((r) => normalizar(r.atalho + " " + r.titulo).includes(termo)).slice(0, 8);
-    if (!achadas.length) return fecharSugestoes();
-    sugestaoAtiva = 0;
-    caixaSugestoes.innerHTML = achadas
-      .map((r, i) => `<div class="sugestao${i === 0 ? " ativa" : ""}" role="option" data-usar-resposta="${r.id}"><strong>/${esc(r.atalho)}</strong> ${esc(r.titulo || "")}<span>${esc(r.texto)}</span></div>`)
-      .join("");
-    caixaSugestoes.hidden = false;
-  });
-  caixaSugestoes.addEventListener("mousedown", (e) => {
-    const s = e.target.closest("[data-usar-resposta]");
-    if (!s) return;
-    e.preventDefault();
-    inserirNoChat(respostas().find((r) => r.id === s.dataset.usarResposta)?.texto || "");
-  });
-  $("#wa-texto").addEventListener("blur", () => setTimeout(fecharSugestoes, 100));
 
   // ---- no modal do lead: follow-ups ----
   function renderFollowupsLead(lead) {
@@ -1143,6 +1167,281 @@
       e.target.checked = !e.target.checked;
       toast(err.message, true);
     }
+  });
+
+  // ---------- aba Conversas (caixa de entrada do WhatsApp) ----------
+  const ICONE_VOLTAR = `<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg>`;
+  const jidUrl = (jid) => encodeURIComponent(jid);
+
+  function nomeConversa(c) {
+    return c.nomeContato || c.nome || (c.telefone ? formatarTelefone(c.telefone) : "Contato do WhatsApp");
+  }
+  function iniciais(nome) {
+    const partes = String(nome).replace(/[^\p{L}\p{N} ]/gu, "").trim().split(/\s+/).filter(Boolean);
+    return ((partes[0]?.[0] || "?") + (partes.length > 1 ? partes.at(-1)[0] : "")).toUpperCase();
+  }
+  function horaCurta(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const hoje = new Date();
+    const ontem = new Date(Date.now() - 86400000);
+    if (d.toDateString() === hoje.toDateString()) return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    if (d.toDateString() === ontem.toDateString()) return "ontem";
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  }
+
+  async function carregarConversas() {
+    estado.conversas = await api("GET", "/api/conversas");
+    renderBolhaConversas();
+    if (estado.aba === "conversas") renderListaConversas();
+  }
+
+  function renderBolhaConversas() {
+    const total = estado.conversas.reduce((s, c) => s + (c.naoLidas || 0), 0);
+    const bolha = $("#cv-bolha");
+    bolha.hidden = !total;
+    bolha.textContent = total > 99 ? "99+" : String(total);
+  }
+
+  function conversasFiltradas() {
+    const termo = normalizar(estado.cvBusca.trim());
+    return estado.conversas.filter((c) => {
+      if (estado.cvFiltro === "nao-lidas" && !c.naoLidas) return false;
+      if (estado.cvFiltro === "sem-lead" && c.lead) return false;
+      if (estado.cvFiltro === "leads" && !c.lead) return false;
+      if (!termo) return true;
+      const alvo = normalizar([nomeConversa(c), c.nome, c.telefone, c.ultimaMensagem, c.lead?.nome].join(" "));
+      return alvo.includes(termo) || (termo.replace(/\D/g, "").length >= 4 && String(c.telefone).includes(termo.replace(/\D/g, "")));
+    });
+  }
+
+  function renderListaConversas() {
+    $$("[data-cv-filtro]").forEach((b) => b.classList.toggle("ativo", b.dataset.cvFiltro === estado.cvFiltro));
+    const lista = conversasFiltradas();
+    const wa = estado.whatsapp.status;
+    let vazio = "";
+    if (!estado.conversas.length) {
+      vazio = wa === "conectado"
+        ? `<div class="cv-lista-vazia"><div class="carregando"></div><span>Carregando conversas do WhatsApp…</span><small>As conversas aparecem aqui conforme o celular sincroniza.</small></div>`
+        : `<div class="cv-lista-vazia"><strong>WhatsApp desconectado</strong><span>Conecte o seu WhatsApp para ver as conversas aqui.</span><button class="btn btn-primario" data-ir-aba="whatsapp">Conectar WhatsApp</button></div>`;
+    } else if (!lista.length) {
+      vazio = `<div class="cv-lista-vazia"><span>Nenhuma conversa encontrada.</span></div>`;
+    }
+    $("#cv-lista").innerHTML = vazio || lista.map((c) => {
+      const nome = nomeConversa(c);
+      return `<button type="button" class="cv-item${c.jid === estado.conversaAberta ? " ativa" : ""}${c.naoLidas ? " nao-lida" : ""}" data-jid="${esc(c.jid)}">
+        <span class="avatar${c.lead ? " " + (CLASSE_ETAPA[c.lead.etapa] || "") : ""}">${esc(iniciais(nome))}</span>
+        <span class="cv-meio">
+          <strong>${esc(nome)}</strong>
+          <span class="previa">${esc(c.ultimaMensagem || "")}</span>
+        </span>
+        <span class="cv-lado">
+          <time>${esc(horaCurta(c.ultimaEm))}</time>
+          ${c.naoLidas ? `<span class="bolha">${c.naoLidas}</span>` : ""}
+          ${c.lead ? `<span class="cv-etapa ${CLASSE_ETAPA[c.lead.etapa] || ""}"><span class="ponto"></span>${esc(c.lead.etapa)}</span>` : `<span class="cv-sem-lead">sem lead</span>`}
+        </span>
+      </button>`;
+    }).join("");
+    if (!estado.conversaAberta) $("#inbox").classList.remove("com-chat");
+  }
+
+  function renderCabecalhoConversa() {
+    const c = estado.conversaDados;
+    const lead = c.lead && estado.leads.find((l) => l.id === c.lead.id);
+    const nome = nomeConversa(c);
+    const numero = c.telefone ? formatarTelefone(c.telefone) : "número oculto pelo WhatsApp";
+    const acoes = lead
+      ? `<div class="cv-lead ${CLASSE_ETAPA[lead.etapa] || ""}">
+          <span class="cv-lead-rotulo">Lead</span>
+          <select class="etapa" id="cv-mover" aria-label="Etapa do funil">${opcoesEtapa(lead.etapa)}</select>
+          <button type="button" class="btn btn-secundario mini" data-cv-abrir-lead="${lead.id}">Abrir lead</button>
+        </div>`
+      : `<div class="cv-acoes">
+          <button type="button" class="btn btn-primario" id="cv-adicionar">+ Adicionar como lead</button>
+          <select id="cv-vincular" aria-label="Vincular a um lead existente">
+            <option value="">Vincular a lead existente…</option>
+            ${[...estado.leads].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((l) => `<option value="${l.id}">${esc(l.nome)}${l.empresa ? " — " + esc(l.empresa) : ""}</option>`).join("")}
+          </select>
+        </div>`;
+    $("#cv-cabecalho").innerHTML = `
+      <button type="button" class="icone-btn cv-voltar" id="cv-voltar" aria-label="Voltar para a lista">${ICONE_VOLTAR}</button>
+      <span class="avatar${lead ? " " + (CLASSE_ETAPA[lead.etapa] || "") : ""}">${esc(iniciais(nome))}</span>
+      <div class="cv-quem"><strong>${esc(nome)}</strong><span>${esc(numero)}${lead && lead.nome !== nome ? ` · lead: ${esc(lead.nome)}` : ""}</span></div>
+      ${acoes}`;
+  }
+
+  function renderMensagensConversa({ rolar = false } = {}) {
+    const caixa = $("#cv-mensagens");
+    const pertoDoFim = caixa.scrollHeight - caixa.scrollTop - caixa.clientHeight < 80;
+    let dia = "";
+    caixa.innerHTML = (estado.conversaDados.mensagens || []).map((m) => {
+      const d = new Date(m.em);
+      const rotuloDia = d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+      const separador = rotuloDia !== dia ? `<div class="cv-dia"><span>${esc((dia = rotuloDia))}</span></div>` : "";
+      return `${separador}<div class="msg ${m.direcao === "saida" ? "saida" : "entrada"}">${esc(m.texto)}<time>${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time></div>`;
+    }).join("") || `<div class="sem-msg">Sem mensagens de texto nesta conversa ainda.</div>`;
+    if (rolar || pertoDoFim) caixa.scrollTop = caixa.scrollHeight;
+  }
+
+  function renderAvisoConversa() {
+    const conectado = estado.whatsapp.status === "conectado";
+    $("#cv-enviar").disabled = !conectado;
+    $("#cv-aviso").innerHTML = conectado ? "" : `WhatsApp desconectado. <a href="#" data-ir-aba="whatsapp">Conecte pelo QR Code</a> para responder.`;
+  }
+
+  function renderConversas() {
+    renderListaConversas();
+    const aberta = !!estado.conversaDados;
+    $("#cv-vazio").hidden = aberta;
+    $("#cv-conteudo").hidden = !aberta;
+    $("#inbox").classList.toggle("com-chat", aberta);
+    if (aberta) {
+      renderCabecalhoConversa();
+      renderMensagensConversa();
+      renderAvisoConversa();
+    }
+  }
+
+  async function abrirConversa(jid, { rolar = true } = {}) {
+    try {
+      estado.conversaDados = await api("GET", `/api/conversas/${jidUrl(jid)}`);
+    } catch (err) {
+      toast(err.message, true);
+      return;
+    }
+    const mudou = estado.conversaAberta !== jid;
+    estado.conversaAberta = jid;
+    if (mudou) {
+      $("#cv-texto").value = "";
+      compositorConversa.renderAtalhos();
+    }
+    renderConversas();
+    renderMensagensConversa({ rolar: rolar || mudou });
+    if (estado.conversaDados.naoLidas) {
+      estado.conversaDados.naoLidas = 0;
+      const resumo = estado.conversas.find((c) => c.jid === jid);
+      if (resumo) resumo.naoLidas = 0;
+      renderBolhaConversas();
+      renderListaConversas();
+      api("POST", `/api/conversas/${jidUrl(jid)}/lida`).catch(() => {});
+    }
+    if (mudou && window.matchMedia("(min-width: 761px)").matches) $("#cv-texto").focus();
+  }
+
+  function fecharConversa() {
+    estado.conversaAberta = null;
+    estado.conversaDados = null;
+    renderConversas();
+  }
+
+  async function enviarNaConversa() {
+    const campo = $("#cv-texto");
+    const texto = campo.value.trim();
+    if (!texto || !estado.conversaAberta) return;
+    const botao = $("#cv-enviar");
+    botao.disabled = true;
+    try {
+      estado.conversaDados = await api("POST", `/api/conversas/${jidUrl(estado.conversaAberta)}/mensagens`, { texto });
+      campo.value = "";
+      renderMensagensConversa({ rolar: true });
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      renderAvisoConversa();
+    }
+  }
+
+  const compositorConversa = ligarCompositor({
+    campo: $("#cv-texto"),
+    caixa: $("#cv-sugestoes"),
+    atalhos: $("#cv-atalhos"),
+    alvo: () => {
+      const c = estado.conversaDados;
+      return (c?.lead && estado.leads.find((l) => l.id === c.lead.id)) || { nome: c ? nomeConversa(c) : "" };
+    },
+    enviar: enviarNaConversa,
+  });
+  $("#cv-enviar").addEventListener("click", enviarNaConversa);
+
+  $("#cv-lista").addEventListener("click", (e) => {
+    const item = e.target.closest("[data-jid]");
+    if (item) abrirConversa(item.dataset.jid);
+  });
+  $$("[data-cv-filtro]").forEach((b) => b.addEventListener("click", () => {
+    estado.cvFiltro = b.dataset.cvFiltro;
+    renderListaConversas();
+  }));
+  $("#cv-busca").addEventListener("input", (e) => {
+    estado.cvBusca = e.target.value;
+    renderListaConversas();
+  });
+
+  // Ações do cabeçalho da conversa: adicionar, vincular, mudar etapa, abrir lead, voltar.
+  $("#cv-cabecalho").addEventListener("click", (e) => {
+    if (e.target.closest("#cv-voltar")) return fecharConversa();
+    if (e.target.closest("#cv-adicionar")) return adicionarLeadDaConversa();
+    const abrir = e.target.closest("[data-cv-abrir-lead]");
+    if (abrir) abrirModal(abrir.dataset.cvAbrirLead);
+  });
+  $("#cv-cabecalho").addEventListener("change", async (e) => {
+    const c = estado.conversaDados;
+    if (e.target.id === "cv-mover" && c?.lead) {
+      await moverEtapa(c.lead.id, e.target.value);
+      await abrirConversa(c.jid, { rolar: false });
+      carregarConversas().catch(() => {});
+    }
+    if (e.target.id === "cv-vincular" && e.target.value) {
+      const lead = estado.leads.find((l) => l.id === e.target.value);
+      if (!confirm(`Ligar esta conversa ao lead “${lead?.nome}”? O histórico da conversa vai para o lead.`)) {
+        e.target.value = "";
+        return;
+      }
+      try {
+        substituir(await api("POST", `/api/conversas/${jidUrl(c.jid)}/vincular`, { leadId: e.target.value }));
+        toast("Conversa ligada ao lead");
+        await abrirConversa(c.jid, { rolar: false });
+        carregarConversas().catch(() => {});
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+  });
+
+  function adicionarLeadDaConversa() {
+    const c = estado.conversaDados;
+    if (!c) return;
+    const pais = c.telefone.startsWith("55") ? "Brasil" : c.telefone.startsWith("351") ? "Portugal" : "";
+    abrirModal(null, {
+      preencher: {
+        nome: c.nomeContato || c.nome || "",
+        telefone: c.telefone ? formatarTelefone(c.telefone) : "",
+        pais,
+        etapa: "Novo Lead",
+        whatsappJid: c.jid,
+      },
+    });
+  }
+
+  // Do modal do lead para a conversa dele.
+  $("#lead-ver-conversa").addEventListener("click", (e) => {
+    e.preventDefault();
+    const jid = e.currentTarget.dataset.jid;
+    fecharModal();
+    trocarAba("conversas");
+    abrirConversa(jid);
+  });
+  function atualizarLinkConversa(lead) {
+    const conversa = lead && estado.conversas.find((c) => c.lead?.id === lead.id);
+    const link = $("#lead-ver-conversa");
+    link.hidden = !conversa;
+    if (conversa) link.dataset.jid = conversa.jid;
+  }
+
+  document.addEventListener("click", (e) => {
+    const ir = e.target.closest("[data-ir-aba]");
+    if (!ir) return;
+    e.preventDefault();
+    trocarAba(ir.dataset.irAba);
   });
 
   // ---------- topo, abas e filtros ----------
@@ -1255,6 +1554,19 @@
   });
 
   // ---------- tempo real ----------
+  let esperaConversas;
+  function agendarConversas() {
+    clearTimeout(esperaConversas);
+    esperaConversas = setTimeout(async () => {
+      try {
+        await carregarConversas();
+        // Conversa aberta e visível: atualiza as mensagens (e marca como lida).
+        if (estado.conversaAberta && estado.aba === "conversas") await abrirConversa(estado.conversaAberta, { rolar: false });
+      } catch {
+        /* tenta de novo no próximo aviso */
+      }
+    }, 300);
+  }
   let esperaRecarga;
   function conectarEventos() {
     const fonte = new EventSource("/api/eventos");
@@ -1269,16 +1581,26 @@
     fonte.addEventListener("leads", () => {
       clearTimeout(esperaRecarga);
       esperaRecarga = setTimeout(() => carregarLeads().catch(() => {}), 150);
+      agendarConversas(); // etapa e nome do lead aparecem na lista de conversas
     });
+    fonte.addEventListener("conversas", agendarConversas);
   }
+
+  // A caixa de entrada ocupa a altura que sobra abaixo do topo (que muda de altura no celular).
+  function medirTopo() {
+    document.documentElement.style.setProperty("--altura-topo", $(".topo").offsetHeight + "px");
+  }
+  window.addEventListener("resize", medirTopo);
 
   // ---------- início ----------
   (async () => {
+    medirTopo();
     $("#f-ordem").value = estado.ordem;
     preencherFiltroRegiao();
     try {
       const [leads, config, wa] = await Promise.all([api("GET", "/api/leads"), api("GET", "/api/config"), api("GET", "/api/whatsapp")]);
       Object.assign(estado, { leads, config, whatsapp: wa });
+      await carregarConversas();
     } catch (err) {
       toast("Não foi possível carregar os leads: " + err.message, true);
     }

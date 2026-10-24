@@ -129,7 +129,7 @@ export class Followups {
     const quando = new Date(agendadoPara);
     if (Number.isNaN(quando.getTime())) throw new ErroValidacao("Data e hora do follow-up inválidas");
     if (quando.getTime() < Date.now() - 60_000) throw new ErroValidacao("Escolha uma data e hora no futuro");
-    if (!lead.telefone) throw new ErroValidacao("Lead sem telefone");
+    if (!lead.telefone && !lead.whatsappJid) throw new ErroValidacao("Lead sem telefone");
     lead.followups ||= [];
     lead.followups.push({
       id: randomUUID(),
@@ -172,11 +172,12 @@ export class Followups {
       if (lead.etapa !== f.etapa) return this.#encerrar(f, "cancelado", `Lead saiu da etapa ${f.etapa}`);
     }
     if (lead.optOut && !manual) return this.#encerrar(f, "cancelado", "Lead pediu para não receber mensagens");
-    if (!lead.telefone) return this.#encerrar(f, "falhou", "Lead sem telefone");
+    if (!lead.telefone && !lead.whatsappJid) return this.#encerrar(f, "falhou", "Lead sem telefone");
 
     const texto = preencherVariaveis(regra ? regra.texto : f.texto, lead);
+    let enviada;
     try {
-      await this.whatsapp.enviar(lead.telefone, texto, lead.pais);
+      enviada = await this.whatsapp.enviarParaLead(lead, texto);
     } catch (e) {
       f.motivo = e.message;
       if (/não tem WhatsApp|Telefone inválido/.test(e.message)) {
@@ -193,7 +194,7 @@ export class Followups {
 
     f.texto = texto; // guarda o texto que de fato saiu
     this.#encerrar(f, "enviado", "");
-    await this.store.registrarMensagem(lead.id, { direcao: "saida", texto, em: new Date().toISOString(), origem: "followup" });
+    await this.store.registrarMensagem(lead.id, { id: enviada?.id || "", direcao: "saida", texto, em: new Date().toISOString(), origem: "followup" });
     // Integração com o Kanban: a regra pode mover o lead de etapa depois do envio.
     if (regra?.moverPara && lead.etapa === f.etapa) await this.store.atualizar(lead.id, { etapa: regra.moverPara });
     this.avisar(lead.id);
