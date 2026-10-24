@@ -201,7 +201,14 @@ rede. Se não abrir:
 O computador que roda o servidor precisa ficar ligado; o WhatsApp conectado continua funcionando
 enquanto o servidor estiver de pé. Mesmo em rede local, defina `APP_PASSWORD`.
 
-### Com Docker (VPS)
+### Na internet, com HTTPS (VPS)
+
+Para usar de qualquer lugar em `https://leads.suaempresa.com.br`: numa VPS Ubuntu, dentro da pasta
+`deploy`, rode `sudo ./instalar-vps.sh`. Ele instala o Docker, sobe o sistema com o **Caddy** na
+frente (certificado HTTPS grátis, renovado sozinho) e pede senha de acesso. Passo a passo completo —
+DNS, levar os dados do computador, atualizar, backup — em [`deploy/LEIA-ME.md`](deploy/LEIA-ME.md).
+
+### Com Docker (manual)
 
 ```bash
 cd controle-de-leads-2026
@@ -210,7 +217,7 @@ docker run -d --name leads --restart unless-stopped -p 3000:3000 \
   -e APP_PASSWORD="uma-senha-forte" -v leads-dados:/app/data controle-de-leads-2026
 ```
 
-Coloque um proxy com HTTPS (Caddy, Nginx, Traefik) na frente se for expor na internet.
+Para expor na internet, use o `deploy/docker-compose.yml` (já vem com o HTTPS) em vez deste comando.
 
 ### Variáveis de ambiente
 
@@ -221,11 +228,12 @@ Coloque um proxy com HTTPS (Caddy, Nginx, Traefik) na frente se for expor na int
 | `DATA_DIR` | `./data` | Onde ficam `leads.json` e a sessão do WhatsApp |
 | `TZ` | `America/Sao_Paulo` | Fuso usado no carimbo das notas rápidas |
 | `WA_LOG_LEVEL` | `silent` | Log da biblioteca do WhatsApp (`info`, `debug`) |
+| `ANTHROPIC_API_KEY` | *(vazia)* | Chave da API da Anthropic para o assistente de IA (opcional; também dá para colar na tela) |
 | `WA_SIMULADO` | *(vazia)* | `1` = modo demonstração: WhatsApp de mentira com conversas de exemplo, dados em `data-demonstracao/` |
 
 ## Versão
 
-A versão e a data dela aparecem no canto superior direito (ex.: `v1.4.0 · 24/10/2026`). Elas vêm
+A versão e a data dela aparecem no canto superior direito (ex.: `v1.5.0 · 24/10/2026`). Elas vêm
 dos campos `version` e `dataVersao` do `package.json`.
 
 ## WhatsApp não carrega as mensagens? (passo a passo)

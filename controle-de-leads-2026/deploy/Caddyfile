@@ -1,0 +1,15 @@
+# HTTPS na frente do Controle de Leads. O Caddy pede e renova o certificado sozinho para o
+# domínio do .env (o DNS do domínio precisa apontar para esta VPS, e as portas 80 e 443 abertas).
+{$DOMINIO} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	# anexos do chat vão até 64 MB
+	request_body {
+		max_size 70MB
+	}
+	reverse_proxy app:3000
+}
