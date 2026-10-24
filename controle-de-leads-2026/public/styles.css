@@ -521,6 +521,33 @@ kbd { font: inherit; font-size: 0.78rem; font-weight: 700; background: #fff; bor
 .diagnostico dd { margin: 0; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; max-width: 320px; overflow-wrap: anywhere; }
 .diag-aviso { background: #fef3c7; color: #78350f; border-radius: 10px; padding: 10px 12px; line-height: 1.45; }
 
+/* ---------- origem, etiquetas e importação ---------- */
+.etiquetas { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.etiqueta { font-size: 0.68rem; font-weight: 700; color: var(--verde-800); background: var(--verde-100); border: 1px solid var(--verde-200); border-radius: 999px; padding: 1px 8px; }
+.tabela td .etiquetas-celula { min-width: 160px; }
+.soltar-arquivo { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 36px 20px; border: 2px dashed var(--verde-300); border-radius: 16px; background: var(--verde-50); cursor: pointer; text-align: center; color: var(--texto-suave); }
+.soltar-arquivo svg { width: 40px; height: 40px; color: var(--verde-600); }
+.soltar-arquivo strong { color: var(--verde-900); font-size: 1rem; }
+.soltar-arquivo.ativo, .soltar-arquivo:hover { border-color: var(--verde-500); background: var(--verde-100); }
+.imp-resumo { margin: 0 0 12px; }
+.imp-titulo { margin: 18px 0 8px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--texto-suave); }
+.imp-mapa { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.imp-coluna { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 2px 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--borda); border-radius: 12px; background: #fff; }
+.imp-coluna.mapeada { border-color: var(--verde-300); background: var(--verde-50); }
+.imp-cab { font-weight: 700; font-size: 0.84rem; color: var(--verde-950); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-coluna small { grid-column: 1; font-size: 0.72rem; color: var(--texto-suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-seta { display: none; }
+.imp-coluna select { grid-column: 2; grid-row: 1 / span 2; width: 170px; padding: 6px 8px; font-size: 0.8rem; }
+.imp-previa { max-height: 220px; }
+.imp-previa td { white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; padding: 8px 10px; }
+.imp-final { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.imp-numero { border: 1px solid var(--borda); border-radius: 14px; padding: 16px; text-align: center; }
+.imp-numero strong { display: block; font-size: 2rem; color: var(--verde-900); }
+.imp-numero span { font-size: 0.8rem; color: var(--texto-suave); }
+.imp-numero.ok { background: var(--verde-50); border-color: var(--verde-300); }
+.imp-numero.erro { background: var(--vermelho-fundo); border-color: #fdba74; }
+.imp-lista { margin: 0; padding-left: 20px; font-size: 0.84rem; line-height: 1.6; color: var(--texto-suave); }
+
 /* ---------- toasts ---------- */
 .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
 .toast { background: var(--verde-900); color: #fff; padding: 12px 16px; border-radius: 12px; font-size: 0.86rem; box-shadow: 0 8px 24px rgba(6, 35, 26, 0.3); animation: aparecer 0.2s ease-out; max-width: 340px; border-left: 4px solid var(--verde-400); }
@@ -578,6 +605,8 @@ kbd { font: inherit; font-size: 0.78rem; font-weight: 700; background: #fff; bor
   .item-total { grid-area: t; }
   .totais { max-width: none; }
   .cv-fila { width: 100%; justify-content: space-between; }
+  .imp-final { grid-template-columns: 1fr; }
+  .imp-coluna select { width: 140px; }
   .inbox { grid-template-columns: 1fr; height: calc(100dvh - var(--altura-topo, 216px) - 54px); min-height: 420px; }
   .aba { padding: 10px 10px; gap: 5px; font-size: 0.82rem; }
   .aba svg { width: 16px; height: 16px; }

@@ -23,6 +23,8 @@
     aba: lerPreferencia("aba", "tabela"),
     busca: "",
     etapa: "",
+    origem: "",
+    etiqueta: "",
     pais: "",
     regiao: "",
     cidade: "",
@@ -186,8 +188,10 @@
           if (tipo === "d" && l.distrito !== valor) return false;
         }
         if (cidade && !normalizar(l.cidade).includes(cidade)) return false;
+        if (estado.origem && (l.origem || "") !== estado.origem) return false;
+        if (estado.etiqueta && !(l.etiquetas || []).some((e) => e.toLowerCase() === estado.etiqueta.toLowerCase())) return false;
         if (termo) {
-          const alvo = normalizar([l.nome, l.empresa, l.cidade, l.email, l.telefone, l.cargo, l.uf, l.distrito, l.etapa].join(" "));
+          const alvo = normalizar([l.nome, l.empresa, l.cidade, l.email, l.telefone, l.cargo, l.uf, l.distrito, l.etapa, l.origem, ...(l.etiquetas || [])].join(" "));
           const soDigitos = termo.replace(/\D/g, "");
           if (!alvo.includes(termo) && !(soDigitos.length >= 4 && String(l.telefone).replace(/\D/g, "").includes(soDigitos))) return false;
         }
@@ -218,6 +222,7 @@
       return;
     }
     estado.renderPendente = false;
+    atualizarOpcoesDeOrigemEEtiqueta();
     renderKpis();
     renderAbas();
     if (estado.aba === "tabela") renderTabela();
@@ -226,6 +231,21 @@
     if (estado.aba === "conversas") renderConversas();
     if (estado.aba === "pedidos") renderPedidos();
     renderPilula();
+  }
+
+  // Filtros e sugestões de origem/etiqueta saem do que já existe nos leads.
+  const ORIGENS_SUGERIDAS = ["WhatsApp", "Instagram", "Facebook", "Google", "Site", "Indicação", "Evento", "Planilha"];
+  function atualizarOpcoesDeOrigemEEtiqueta() {
+    const origens = [...new Set([...estado.leads.map((l) => l.origem).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    const etiquetas = [...new Map(estado.leads.flatMap((l) => l.etiquetas || []).map((e) => [e.toLowerCase(), e])).values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    const preencher = (sel, lista, atual) => {
+      const valor = atual;
+      sel.innerHTML = `<option value="">Todas</option>` + lista.map((v) => `<option${v === valor ? " selected" : ""}>${esc(v)}</option>`).join("");
+      if (valor && !lista.includes(valor)) sel.value = "";
+    };
+    preencher($("#f-origem"), origens, estado.origem);
+    preencher($("#f-etiqueta"), etiquetas, estado.etiqueta);
+    $("#lista-origens").innerHTML = [...new Set([...ORIGENS_SUGERIDAS, ...origens])].map((o) => `<option value="${esc(o)}"></option>`).join("");
   }
 
   function renderAbas() {
@@ -277,6 +297,8 @@
       <td><select data-campo="${l.pais === "Portugal" ? "distrito" : "uf"}" ${l.pais ? "" : "disabled"} aria-label="UF ou distrito">${opcoesRegiao(l.pais, regiaoDe(l), l.pais ? "Selecione" : "Escolha o país")}</select></td>
       <td><input data-campo="cidade" value="${esc(l.cidade)}" placeholder="—" aria-label="Cidade" /></td>
       <td class="${classe}"><select class="etapa" data-campo="etapa" aria-label="Etapa do funil">${opcoesEtapa(l.etapa)}</select></td>
+      <td><input data-campo="origem" value="${esc(l.origem || "")}" list="lista-origens" placeholder="—" aria-label="Origem" /></td>
+      <td><input class="etiquetas-celula" data-campo="etiquetas" value="${esc((l.etiquetas || []).join(", "))}" placeholder="—" title="Separe por vírgula" aria-label="Etiquetas" /></td>
       <td><input class="obs" data-campo="observacoes" value="${esc((l.observacoes || "").split("\n").pop())}" title="${esc(l.observacoes)}" placeholder="Adicionar nota…" aria-label="Observações" /></td>
       <td class="col-acoes">
         <button class="icone-btn" data-acao="abrir" title="Abrir / editar"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z" /></svg></button>
@@ -306,6 +328,7 @@
       </div>
       ${l.empresa ? `<p><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M9 7h2M13 7h2M9 11h2M13 11h2M10 21v-4h4v4" /></svg>${esc(l.empresa)}${l.cargo ? ` · ${esc(l.cargo)}` : ""}</p>` : ""}
       ${local ? `<p><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>${esc(local)}</p>` : ""}
+      ${(l.etiquetas || []).length ? `<div class="etiquetas">${l.etiquetas.map((e) => `<span class="etiqueta">${esc(e)}</span>`).join("")}</div>` : ""}
       ${badgeFollowup(l)}
       <div class="cartao-rodape">
         <span class="valor">${moeda(l.faturamentoMensal, l.pais)}<small style="font-weight:500;color:var(--texto-suave)">/mês</small></span>
@@ -534,7 +557,7 @@
     el.dataset.salvando = "1";
     try {
       const novo = await salvarCampo(id, campos);
-      if (["pais", "etapa", "faturamentoMensal"].includes(campo)) {
+      if (["pais", "etapa", "faturamentoMensal", "etiquetas"].includes(campo)) {
         const foco = document.activeElement === el;
         tr.outerHTML = linhaTabela(novo);
         const novaLinha = $(`#tabela-corpo tr[data-id="${id}"]`);
@@ -714,7 +737,8 @@
     $("#btn-salvar").textContent = lead ? "Salvar alterações" : "Criar lead";
 
     const v = lead || { pais: "", criadoEm: new Date().toISOString(), ...(preencher || {}) };
-    for (const campo of ["nome", "email", "telefone", "cargo", "empresa", "cidade", "observacoes"]) form[campo].value = v[campo] || "";
+    for (const campo of ["nome", "email", "telefone", "cargo", "empresa", "cidade", "observacoes", "origem"]) form[campo].value = v[campo] || "";
+    form.etiquetas.value = (v.etiquetas || []).join(", ");
     form.faturamentoMensal.value = lead ? v.faturamentoMensal || "" : "";
     form.criadoEm.value = paraInputData(v.criadoEm);
     form.pais.value = v.pais || "";
@@ -778,6 +802,8 @@
       uf: pais === "Brasil" ? form.uf.value : "",
       distrito: pais === "Portugal" ? form.distrito.value : "",
       etapa: form.etapa.value,
+      origem: form.origem.value.trim(),
+      etiquetas: form.etiquetas.value,
     };
     if (!atual && estado.novoLeadJid) dados.whatsappJid = estado.novoLeadJid; // veio da aba Conversas
     const botao = $("#btn-salvar");
@@ -1680,6 +1706,7 @@
         telefone: c.telefone ? formatarTelefone(c.telefone) : "",
         pais,
         etapa: "Novo Lead",
+        origem: "WhatsApp",
         whatsappJid: c.jid,
       },
     });
@@ -2131,6 +2158,197 @@
   });
   $("#lead-novo-pedido").addEventListener("click", () => abrirPedido(null, { leadId: estado.leadAberto }));
 
+  // ---------- importação de planilha (CSV) ----------
+  const CAMPOS_IMPORTACAO = [
+    ["nome", "Nome", ["nome", "name", "cliente", "contato", "nome completo", "lead"]],
+    ["telefone", "Telefone", ["telefone", "fone", "celular", "whatsapp", "phone", "tel", "telefone celular"]],
+    ["email", "E-mail", ["email", "e-mail", "mail", "correio eletronico"]],
+    ["empresa", "Empresa", ["empresa", "company", "companhia", "razao social", "negocio"]],
+    ["cargo", "Cargo", ["cargo", "funcao", "job", "titulo"]],
+    ["cidade", "Cidade", ["cidade", "city", "municipio"]],
+    ["uf", "UF / Estado", ["uf", "estado", "state"]],
+    ["pais", "País", ["pais", "country"]],
+    ["distrito", "Distrito (Portugal)", ["distrito"]],
+    ["faturamentoMensal", "Faturamento mensal", ["faturamento", "faturamento mensal", "receita", "valor", "faturamento (r$)"]],
+    ["etapa", "Etapa do funil", ["etapa", "etapa do funil", "status", "fase", "estagio"]],
+    ["origem", "Origem", ["origem", "fonte", "canal", "source"]],
+    ["etiquetas", "Etiquetas", ["etiquetas", "etiqueta", "tags", "tag"]],
+    ["observacoes", "Observações", ["observacoes", "observacao", "obs", "notas", "comentarios", "anotacoes"]],
+    ["criadoEm", "Data de criação", ["data", "data de criacao", "criado em", "data cadastro", "data de cadastro"]],
+  ];
+  const imp = { cabecalho: [], linhas: [], mapa: [] };
+  const modalImportar = $("#modal-importar");
+
+  /** Lê CSV com aspas, separador ; , ou TAB (detectado na primeira linha). */
+  function lerCsv(texto) {
+    texto = texto.replace(/^﻿/, "");
+    const primeira = texto.split(/\r?\n/, 1)[0];
+    const contar = (c) => primeira.split(c).length - 1;
+    const sep = [";", ",", "\t"].sort((a, b) => contar(b) - contar(a))[0];
+    const linhas = [];
+    let campo = "", linha = [], aspas = false;
+    for (let i = 0; i < texto.length; i++) {
+      const ch = texto[i];
+      if (aspas) {
+        if (ch === '"' && texto[i + 1] === '"') { campo += '"'; i++; }
+        else if (ch === '"') aspas = false;
+        else campo += ch;
+      } else if (ch === '"') aspas = true;
+      else if (ch === sep) { linha.push(campo); campo = ""; }
+      else if (ch === "\n" || ch === "\r") {
+        if (ch === "\r" && texto[i + 1] === "\n") i++;
+        linha.push(campo); campo = "";
+        if (linha.some((c) => c.trim())) linhas.push(linha);
+        linha = [];
+      } else campo += ch;
+    }
+    linha.push(campo);
+    if (linha.some((c) => c.trim())) linhas.push(linha);
+    return linhas;
+  }
+
+  // Excel em português costuma salvar CSV em Windows-1252; o resto em UTF-8.
+  async function textoDoArquivo(arquivo) {
+    const bytes = await arquivo.arrayBuffer();
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return new TextDecoder("windows-1252").decode(bytes);
+    }
+  }
+
+  function adivinharCampo(cabecalho, usados) {
+    const n = normalizar(cabecalho).replace(/[_*]/g, " ").replace(/\s+/g, " ").trim();
+    for (const [campo, , sinonimos] of CAMPOS_IMPORTACAO) {
+      if (usados.has(campo)) continue;
+      if (sinonimos.includes(n)) return campo;
+    }
+    for (const [campo, , sinonimos] of CAMPOS_IMPORTACAO) {
+      if (!usados.has(campo) && sinonimos.some((s) => s.length > 3 && n.includes(s))) return campo;
+    }
+    return "";
+  }
+
+  function abrirImportacao() {
+    $("#imp-passo-arquivo").hidden = false;
+    $("#imp-passo-mapa").hidden = true;
+    $("#imp-passo-resultado").hidden = true;
+    $("#imp-confirmar").hidden = true;
+    $("#imp-voltar").hidden = true;
+    $("#imp-arquivo").value = "";
+    $("#imp-etapa").innerHTML = opcoesEtapa("Novo Lead");
+    modalImportar.showModal();
+  }
+
+  async function carregarPlanilha(arquivo) {
+    if (!arquivo) return;
+    if (/\.xlsx?$/i.test(arquivo.name)) return toast("Esse é um arquivo do Excel. Salve como CSV (Arquivo › Salvar como › CSV) e escolha de novo.", true);
+    const linhas = lerCsv(await textoDoArquivo(arquivo));
+    if (linhas.length < 2) return toast("A planilha precisa ter a linha de títulos e pelo menos uma linha de dados", true);
+    imp.cabecalho = linhas[0].map((c) => c.trim());
+    imp.linhas = linhas.slice(1);
+    const usados = new Set();
+    imp.mapa = imp.cabecalho.map((c) => {
+      const campo = adivinharCampo(c, usados);
+      if (campo) usados.add(campo);
+      return campo;
+    });
+    renderMapaImportacao();
+    $("#imp-passo-arquivo").hidden = true;
+    $("#imp-passo-mapa").hidden = false;
+    $("#imp-voltar").hidden = false;
+    $("#imp-confirmar").hidden = false;
+  }
+
+  function linhasMapeadas() {
+    return imp.linhas.map((valores, i) => {
+      const campos = {};
+      imp.mapa.forEach((campo, col) => {
+        if (!campo) return;
+        const v = (valores[col] || "").trim();
+        // Duas colunas no mesmo campo (ex.: "Obs 1" e "Obs 2"): junta.
+        campos[campo] = campos[campo] ? `${campos[campo]}${campo === "etiquetas" ? "," : " "}${v}` : v;
+      });
+      return { linha: i + 2, campos };
+    });
+  }
+
+  function renderMapaImportacao() {
+    $("#imp-resumo").innerHTML = `<strong>${imp.linhas.length}</strong> ${imp.linhas.length === 1 ? "linha encontrada" : "linhas encontradas"} e ${imp.cabecalho.length} colunas.`;
+    const opcoes = (sel) => `<option value="">— não importar —</option>` + CAMPOS_IMPORTACAO.map(([c, r]) => `<option value="${c}"${c === sel ? " selected" : ""}>${r}</option>`).join("");
+    $("#imp-mapa").innerHTML = imp.cabecalho.map((c, col) => `<div class="imp-coluna${imp.mapa[col] ? " mapeada" : ""}">
+        <span class="imp-cab">${esc(c || `Coluna ${col + 1}`)}</span>
+        <small>${esc(imp.linhas.find((l) => (l[col] || "").trim())?.[col] || "(vazia)")}</small>
+        <span class="imp-seta">→</span>
+        <select data-imp-col="${col}" aria-label="Campo para a coluna ${esc(c)}">${opcoes(imp.mapa[col])}</select>
+      </div>`).join("");
+    renderPreviaImportacao();
+  }
+
+  function renderPreviaImportacao() {
+    const usados = CAMPOS_IMPORTACAO.filter(([c]) => imp.mapa.includes(c));
+    const temIdentificacao = ["nome", "empresa", "telefone", "email"].some((c) => imp.mapa.includes(c));
+    $("#imp-confirmar").disabled = !temIdentificacao;
+    $("#imp-confirmar").textContent = `Importar ${imp.linhas.length} ${imp.linhas.length === 1 ? "lead" : "leads"}`;
+    if (!temIdentificacao) {
+      $("#imp-previa").innerHTML = `<tbody><tr><td class="vazio">Escolha qual coluna é o <strong>Nome</strong> (ou Empresa, Telefone ou E-mail).</td></tr></tbody>`;
+      return;
+    }
+    const linhas = linhasMapeadas().slice(0, 5);
+    $("#imp-previa").innerHTML = `<thead><tr>${usados.map(([, r]) => `<th>${r}</th>`).join("")}</tr></thead>
+      <tbody>${linhas.map((l) => `<tr>${usados.map(([c]) => `<td>${esc(l.campos[c] || "")}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  }
+
+  async function confirmarImportacao() {
+    const botao = $("#imp-confirmar");
+    botao.disabled = true;
+    botao.textContent = "Importando…";
+    try {
+      const r = await api("POST", "/api/leads/importar", {
+        linhas: linhasMapeadas(),
+        padroes: { etapa: $("#imp-etapa").value, origem: $("#imp-origem").value.trim() },
+        pularDuplicados: $("#imp-duplicados").checked,
+      });
+      const lista = (itens) => itens.slice(0, 15).map((x) => `<li>Linha ${x.linha}${x.nome ? ` (${esc(x.nome)})` : ""}: ${esc(x.motivo)}</li>`).join("") + (itens.length > 15 ? `<li>… e mais ${itens.length - 15}</li>` : "");
+      $("#imp-passo-resultado").innerHTML = `<div class="imp-final">
+          <div class="imp-numero ok"><strong>${r.criados}</strong><span>importados</span></div>
+          <div class="imp-numero"><strong>${r.pulados.length}</strong><span>já cadastrados (pulados)</span></div>
+          <div class="imp-numero ${r.erros.length ? "erro" : ""}"><strong>${r.erros.length}</strong><span>com problema</span></div>
+        </div>
+        ${r.erros.length ? `<h4 class="imp-titulo">Linhas não importadas</h4><ul class="imp-lista">${lista(r.erros)}</ul>` : ""}
+        ${r.pulados.length ? `<h4 class="imp-titulo">Puladas por já existirem</h4><ul class="imp-lista">${lista(r.pulados)}</ul>` : ""}`;
+      $("#imp-passo-mapa").hidden = true;
+      $("#imp-passo-resultado").hidden = false;
+      botao.hidden = true;
+      toast(`${r.criados} ${r.criados === 1 ? "lead importado" : "leads importados"}`);
+      await carregarLeads();
+    } catch (err) {
+      toast(err.message, true);
+      botao.disabled = false;
+      botao.textContent = `Importar ${imp.linhas.length} leads`;
+    }
+  }
+
+  $("#btn-importar").addEventListener("click", abrirImportacao);
+  $("#imp-arquivo").addEventListener("change", (e) => carregarPlanilha(e.target.files[0]).catch((err) => toast(err.message, true)));
+  $("#imp-soltar").addEventListener("dragover", (e) => { e.preventDefault(); e.currentTarget.classList.add("ativo"); });
+  $("#imp-soltar").addEventListener("dragleave", (e) => e.currentTarget.classList.remove("ativo"));
+  $("#imp-soltar").addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.currentTarget.classList.remove("ativo");
+    carregarPlanilha(e.dataTransfer.files[0]).catch((err) => toast(err.message, true));
+  });
+  $("#imp-mapa").addEventListener("change", (e) => {
+    const col = Number(e.target.dataset.impCol);
+    if (Number.isNaN(col)) return;
+    imp.mapa[col] = e.target.value;
+    e.target.closest(".imp-coluna").classList.toggle("mapeada", !!e.target.value);
+    renderPreviaImportacao();
+  });
+  $("#imp-confirmar").addEventListener("click", confirmarImportacao);
+  $("#imp-voltar").addEventListener("click", abrirImportacao);
+  $$("[data-fechar]", modalImportar).forEach((b) => b.addEventListener("click", () => modalImportar.close()));
+
   // ---------- topo, abas e filtros ----------
   function trocarAba(aba) {
     estado.aba = aba;
@@ -2160,8 +2378,10 @@
   $("#f-regiao").addEventListener("change", (e) => { estado.regiao = e.target.value; render(); });
   $("#f-cidade").addEventListener("input", (e) => { estado.cidade = e.target.value; render(); });
   $("#f-ordem").addEventListener("change", (e) => { estado.ordem = e.target.value; render(); });
+  $("#f-origem").addEventListener("change", (e) => { estado.origem = e.target.value; render(); });
+  $("#f-etiqueta").addEventListener("change", (e) => { estado.etiqueta = e.target.value; render(); });
   $("#btn-limpar").addEventListener("click", () => {
-    Object.assign(estado, { busca: "", etapa: "", pais: "", regiao: "", cidade: "", ordem: "criadoEm:desc" });
+    Object.assign(estado, { busca: "", etapa: "", pais: "", regiao: "", cidade: "", origem: "", etiqueta: "", ordem: "criadoEm:desc" });
     $("#busca").value = "";
     $("#f-etapa").value = "";
     $("#f-pais").value = "";
@@ -2189,6 +2409,8 @@
       ["UF", (l) => l.uf],
       ["Distrito", (l) => l.distrito],
       ["Etapa do Funil", (l) => l.etapa],
+      ["Origem", (l) => l.origem || ""],
+      ["Etiquetas", (l) => (l.etiquetas || []).join(", ")],
     ];
     // Prefixa fórmulas para o Excel não executá-las (injeção de CSV).
     const celula = (v) => {

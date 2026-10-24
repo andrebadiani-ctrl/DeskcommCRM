@@ -85,6 +85,11 @@ export function validarLead(entrada, { parcial = false, atual = {} } = {}) {
     if ("distrito" in entrada && d && !DISTRITOS.includes(d)) throw new ErroValidacao("Distrito inválido");
   }
 
+  if ("origem" in entrada) {
+    if (typeof (entrada.origem ?? "") !== "string") throw new ErroValidacao("Origem deve ser texto");
+    saida.origem = String(entrada.origem ?? "").trim().slice(0, 60);
+  }
+  if ("etiquetas" in entrada) saida.etiquetas = normalizarEtiquetas(entrada.etiquetas);
   if ("whatsappJid" in entrada) {
     const jid = String(entrada.whatsappJid || "");
     if (jid && !/^[\w.:-]+@(s\.whatsapp\.net|lid)$/.test(jid)) throw new ErroValidacao("Conversa do WhatsApp inválida");
@@ -152,6 +157,23 @@ export function validarRegra(entrada, { parcial = false } = {}) {
   if (saida.moverPara && saida.etapa && saida.moverPara === saida.etapa) {
     throw new ErroValidacao("A etapa de destino deve ser diferente da etapa da regra");
   }
+  return saida;
+}
+
+/** Etiquetas: lista (ou texto separado por vírgula), sem repetir e sem vazias. */
+export function normalizarEtiquetas(valor) {
+  const lista = Array.isArray(valor) ? valor : String(valor ?? "").split(/[,;]/);
+  const vistas = new Set();
+  const saida = [];
+  for (const bruta of lista) {
+    if (typeof bruta !== "string") throw new ErroValidacao("Etiquetas devem ser texto");
+    const e = bruta.trim().replace(/\s+/g, " ").slice(0, 30);
+    const chave = e.toLowerCase();
+    if (!e || vistas.has(chave)) continue;
+    vistas.add(chave);
+    saida.push(e);
+  }
+  if (saida.length > 20) throw new ErroValidacao("No máximo 20 etiquetas por lead");
   return saida;
 }
 
@@ -245,26 +267,69 @@ export class Store extends EventEmitter {
     return this.leads.find((l) => l.telefone && chaveTelefone(l.telefone) === chave);
   }
 
-  async criar(entrada) {
+  #montar(entrada) {
     const dados = validarLead(entrada);
-    const lead = {
+    const agora = new Date().toISOString();
+    return {
       id: randomUUID(),
-      criadoEm: new Date().toISOString(),
+      criadoEm: agora,
       nome: "", email: "", telefone: "", cargo: "", empresa: "", observacoes: "",
       faturamentoMensal: 0, cidade: "", pais: "", uf: "", distrito: "",
+      origem: "", etiquetas: [],
       etapa: "Novo Lead",
       mensagens: [],
       followups: [],
       optOut: false,
       ...dados,
-      atualizadoEm: new Date().toISOString(),
+      etapaDesde: agora,
+      atualizadoEm: agora,
     };
-    lead.etapaDesde = new Date().toISOString();
+  }
+
+  async criar(entrada) {
+    const lead = this.#montar(entrada);
     this.leads.unshift(lead);
     // Ouvintes síncronos (agenda de follow-ups) mexem no lead antes de salvar.
     this.emit("etapa", lead, null);
     await this.salvar();
     return lead;
+  }
+
+  /**
+   * Cria muitos leads de uma vez (importação), gravando o arquivo uma vez só.
+   * Linha inválida não impede as outras: volta em `erros` com o motivo.
+   */
+  async criarVarios(entradas, { pularDuplicados = true } = {}) {
+    const telefones = new Set(this.leads.map((l) => chaveTelefone(l.telefone)).filter(Boolean));
+    const emails = new Set(this.leads.map((l) => (l.email || "").toLowerCase()).filter(Boolean));
+    const criados = [];
+    const pulados = [];
+    const erros = [];
+    entradas.forEach((entrada, i) => {
+      const linha = entrada?.linha ?? i + 1;
+      try {
+        const { linha: _l, ...dados } = entrada || {};
+        const lead = this.#montar(dados);
+        const tel = chaveTelefone(lead.telefone);
+        const email = lead.email.toLowerCase();
+        if (pularDuplicados && ((tel && telefones.has(tel)) || (email && emails.has(email)))) {
+          pulados.push({ linha, nome: lead.nome, motivo: "já existe um lead com este telefone ou e-mail" });
+          return;
+        }
+        if (tel) telefones.add(tel);
+        if (email) emails.add(email);
+        criados.push(lead);
+      } catch (e) {
+        if (!(e instanceof ErroValidacao)) throw e;
+        erros.push({ linha, nome: entrada?.nome || "", motivo: e.message });
+      }
+    });
+    for (const lead of criados) {
+      this.leads.unshift(lead);
+      this.emit("etapa", lead, null);
+    }
+    if (criados.length) await this.salvar();
+    return { criados: criados.length, pulados, erros };
   }
 
   async atualizar(id, entrada) {

@@ -75,6 +75,12 @@
       <label>Cidade
         <input id="f-cidade" type="text" placeholder="Filtrar cidade" />
       </label>
+      <label>Origem
+        <select id="f-origem"><option value="">Todas</option></select>
+      </label>
+      <label>Etiqueta
+        <select id="f-etiqueta"><option value="">Todas</option></select>
+      </label>
       <label>Ordenar por
         <select id="f-ordem">
           <option value="criadoEm:desc">Mais recentes</option>
@@ -85,6 +91,9 @@
       </label>
       <div class="filtros-acoes">
         <button id="btn-limpar" class="btn btn-fantasma">Limpar filtros</button>
+        <button id="btn-importar" class="btn btn-secundario">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V9M7 14l5-5 5 5M5 4h14" /></svg>Importar planilha
+        </button>
         <button id="btn-csv" class="btn btn-secundario">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>Exportar CSV
         </button>
@@ -107,6 +116,8 @@
               <th>UF / Distrito</th>
               <th>Cidade</th>
               <th>Etapa do funil</th>
+              <th>Origem</th>
+              <th>Etiquetas</th>
               <th>Observações</th>
               <th class="col-acoes">Ações</th>
             </tr>
@@ -325,6 +336,8 @@
           <label id="campo-distrito" hidden>Distrito<select name="distrito"></select></label>
           <label>Cidade<input name="cidade" maxlength="200" /></label>
           <label>Etapa do funil<select name="etapa"></select></label>
+          <label>Origem<input name="origem" maxlength="60" list="lista-origens" placeholder="WhatsApp, Instagram, Indicação…" /></label>
+          <label>Etiquetas<input name="etiquetas" maxlength="600" placeholder="separe por vírgula: vip, clínica, retorno" /></label>
           <label class="largo">Observações<textarea name="observacoes" rows="4" maxlength="5000"></textarea></label>
         </div>
 
@@ -379,6 +392,47 @@
         <button type="submit" class="btn btn-primario" id="btn-salvar">Salvar</button>
       </div>
     </form>
+  </dialog>
+
+  <datalist id="lista-origens"></datalist>
+
+  <!-- Importar planilha -->
+  <dialog id="modal-importar" class="modal modal-largo">
+    <div class="modal-topo">
+      <h2>Importar leads de planilha</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo">
+      <div id="imp-passo-arquivo">
+        <label class="soltar-arquivo" id="imp-soltar">
+          <input type="file" id="imp-arquivo" accept=".csv,.txt,text/csv" hidden />
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4" /></svg>
+          <strong>Clique para escolher a planilha</strong>
+          <span>ou arraste o arquivo para cá — formato CSV</span>
+        </label>
+        <p class="dica">Está no Excel ou no Google Planilhas? Use <strong>Arquivo › Salvar como / Fazer download › CSV</strong>. A primeira linha deve ter os nomes das colunas (Nome, Telefone, E-mail, Empresa…).</p>
+      </div>
+      <div id="imp-passo-mapa" hidden>
+        <p class="imp-resumo" id="imp-resumo"></p>
+        <h4 class="imp-titulo">1. Confira de onde vem cada informação</h4>
+        <div class="imp-mapa" id="imp-mapa"></div>
+        <h4 class="imp-titulo">2. Opções</h4>
+        <div class="grade">
+          <label>Etapa para quem não tiver etapa<select id="imp-etapa"></select></label>
+          <label>Origem para quem não tiver origem<input id="imp-origem" list="lista-origens" value="Planilha" maxlength="60" /></label>
+          <label class="largo"><span class="check"><input type="checkbox" id="imp-duplicados" checked /> Pular quem já está cadastrado (mesmo telefone ou e-mail)</span></label>
+        </div>
+        <h4 class="imp-titulo">3. Prévia</h4>
+        <div class="tabela-rolagem imp-previa"><table class="tabela" id="imp-previa"></table></div>
+      </div>
+      <div id="imp-passo-resultado" hidden></div>
+    </div>
+    <div class="modal-rodape">
+      <button type="button" class="btn btn-fantasma" id="imp-voltar" hidden>Escolher outro arquivo</button>
+      <span class="espaco"></span>
+      <button type="button" class="btn btn-fantasma" data-fechar>Fechar</button>
+      <button type="button" class="btn btn-primario" id="imp-confirmar" hidden>Importar</button>
+    </div>
   </dialog>
 
   <!-- Pedido -->

@@ -11,6 +11,7 @@ import express from "express";
 import { Conversas } from "./conversas.mjs";
 import { ErroValidacao, Store, chaveTelefone } from "./store.mjs";
 import { Followups } from "./followups.mjs";
+import { LIMITE_IMPORTACAO, normalizarLinha } from "./importacao.mjs";
 import { Pedidos, STATUS_PEDIDO } from "./pedidos.mjs";
 import { WhatsApp } from "./whatsapp.mjs";
 import { WhatsAppSimulado } from "./whatsapp-simulado.mjs";
@@ -94,6 +95,7 @@ whatsapp.on("mensagem", async ({ jid, jidWhatsapp, id, fromMe, telefone, nome, t
         telefone: telefone ? `+${telefone}` : "",
         pais,
         whatsappJid: jid,
+        origem: "WhatsApp",
         etapa: "Novo Lead",
         observacoes: "Lead criado automaticamente a partir de uma mensagem no WhatsApp.",
       });
@@ -109,7 +111,9 @@ whatsapp.on("mensagem", async ({ jid, jidWhatsapp, id, fromMe, telefone, nome, t
 
 const app = express();
 app.disable("x-powered-by");
-app.use(express.json({ limit: "200kb" }));
+// JSON pequeno em tudo, menos na importação de planilha (que tem rota própria, com limite maior).
+const jsonPequeno = express.json({ limit: "200kb" });
+app.use((req, res, next) => (req.path === "/api/leads/importar" ? next() : jsonPequeno(req, res, next)));
 
 // Senha opcional (HTTP Basic). Recomendado em qualquer servidor exposto na internet.
 if (SENHA) {
@@ -136,6 +140,18 @@ app.post("/api/leads", assincrono(async (req, res) => {
   if (conversa) lead = await store.importarMensagens(lead.id, conversa.mensagens);
   transmitir("leads", { motivo: "criado", id: lead.id });
   res.status(201).json({ data: lead });
+}));
+
+// Importação de planilha: a tela manda as linhas já com as colunas mapeadas.
+app.post("/api/leads/importar", express.json({ limit: "15mb" }), assincrono(async (req, res) => {
+  const linhas = req.body?.linhas;
+  if (!Array.isArray(linhas) || !linhas.length) throw new ErroValidacao("Nenhuma linha para importar");
+  if (linhas.length > LIMITE_IMPORTACAO) throw new ErroValidacao(`No máximo ${LIMITE_IMPORTACAO} linhas por importação`);
+  const padroes = { etapa: req.body.padroes?.etapa, origem: String(req.body.padroes?.origem || "").slice(0, 60) };
+  const entradas = linhas.map((l, i) => ({ linha: Number(l?.linha) || i + 2, ...normalizarLinha(l?.campos, padroes) }));
+  const resultado = await store.criarVarios(entradas, { pularDuplicados: req.body.pularDuplicados !== false });
+  if (resultado.criados) transmitir("leads", { motivo: "importacao" });
+  res.json({ data: resultado });
 }));
 
 app.patch("/api/leads/:id", assincrono(async (req, res) => {
