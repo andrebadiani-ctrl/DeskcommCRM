@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { ErroValidacao, Store } from "./store.mjs";
+import { Followups } from "./followups.mjs";
 import { WhatsApp } from "./whatsapp.mjs";
 
 const raiz = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,8 @@ function transmitir(evento, dados) {
 }
 whatsapp.on("estado", (estado) => transmitir("whatsapp", estado));
 
+const followups = new Followups(store, whatsapp, (id) => transmitir("leads", { motivo: "followup", id }));
+
 // Mensagem recebida: registra no lead do mesmo telefone ou cria um lead novo.
 whatsapp.on("mensagem", async ({ telefone, nome, texto, em }) => {
   try {
@@ -39,7 +42,9 @@ whatsapp.on("mensagem", async ({ telefone, nome, texto, em }) => {
         observacoes: "Lead criado automaticamente a partir de uma mensagem no WhatsApp.",
       });
     }
-    await store.registrarMensagem(lead.id, { direcao: "entrada", texto, em });
+    const msg = { direcao: "entrada", texto, em };
+    followups.aoReceberMensagem(lead, msg); // resposta do lead cancela follow-ups; "PARAR" descadastra
+    await store.registrarMensagem(lead.id, msg);
     transmitir("leads", { motivo: "mensagem", id: lead.id });
   } catch (e) {
     console.error("Falha ao registrar mensagem do WhatsApp:", e);
@@ -92,8 +97,55 @@ app.post("/api/leads/:id/notas", assincrono(async (req, res) => {
   res.json({ data: lead });
 }));
 
+// ---- respostas rápidas e regras de follow-up ----
+for (const colecao of ["respostas", "regras"]) {
+  app.post(`/api/${colecao}`, assincrono(async (req, res) => {
+    const item = await store.criarItem(colecao, req.body);
+    transmitir("config", { colecao });
+    res.status(201).json({ data: item });
+  }));
+  app.patch(`/api/${colecao}/:id`, assincrono(async (req, res) => {
+    const item = await store.atualizarItem(colecao, req.params.id, req.body);
+    if (!item) return res.status(404).json({ error: { message: "Item não encontrado" } });
+    transmitir("config", { colecao });
+    res.json({ data: item });
+  }));
+  app.delete(`/api/${colecao}/:id`, assincrono(async (req, res) => {
+    if (!(await store.excluirItem(colecao, req.params.id))) return res.status(404).json({ error: { message: "Item não encontrado" } });
+    transmitir("config", { colecao });
+    res.status(204).end();
+  }));
+}
+
+// ---- follow-ups de um lead ----
+app.post("/api/leads/:id/followups", assincrono(async (req, res) => {
+  const lead = await followups.agendar(req.params.id, req.body || {});
+  if (!lead) return res.status(404).json({ error: { message: "Lead não encontrado" } });
+  transmitir("leads", { motivo: "followup", id: lead.id });
+  res.status(201).json({ data: lead });
+}));
+app.delete("/api/leads/:id/followups/:fid", assincrono(async (req, res) => {
+  const lead = await followups.cancelar(req.params.id, req.params.fid);
+  if (!lead) return res.status(404).json({ error: { message: "Follow-up pendente não encontrado" } });
+  transmitir("leads", { motivo: "followup", id: lead.id });
+  res.json({ data: lead });
+}));
+app.post("/api/leads/:id/followups/:fid/enviar", assincrono(async (req, res) => {
+  try {
+    const lead = await followups.enviarAgora(req.params.id, req.params.fid);
+    if (!lead) return res.status(404).json({ error: { message: "Follow-up pendente não encontrado" } });
+    res.json({ data: lead });
+  } catch (e) {
+    res.status(409).json({ error: { message: e.message } });
+  }
+}));
+
 app.get("/api/config", (_req, res) => res.json({ data: store.config }));
-app.patch("/api/config", assincrono(async (req, res) => res.json({ data: await store.atualizarConfig(req.body) })));
+app.patch("/api/config", assincrono(async (req, res) => {
+  const config = await store.atualizarConfig(req.body);
+  transmitir("config", { colecao: "config" });
+  res.json({ data: config });
+}));
 
 app.get("/api/whatsapp", (_req, res) => res.json({ data: whatsapp.estado() }));
 
@@ -154,6 +206,7 @@ app.listen(PORTA, () => {
     .map((i) => i.address);
   for (const ip of ipsDaRede) console.info(`Na rede local: http://${ip}:${PORTA}`);
   if (!SENHA) console.warn("Aviso: APP_PASSWORD não definida — o painel está sem senha.");
+  followups.iniciar();
   whatsapp.iniciarSeHouverSessao().catch((e) => console.error("WhatsApp:", e));
 });
 

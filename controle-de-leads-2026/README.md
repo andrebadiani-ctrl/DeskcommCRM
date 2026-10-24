@@ -26,6 +26,26 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
   - Mensagens recebidas entram no histórico do lead do mesmo telefone; número novo vira lead em
     *Novo Lead* automaticamente (pode desligar na aba WhatsApp).
   - A sessão fica salva em `data/whatsapp-auth/` e reconecta sozinha quando o servidor reinicia.
+- **Respostas rápidas** — modelos de mensagem com atalho. No chat do lead, digite `/` (ex.: `/ola`)
+  ou clique no atalho acima da caixa de texto. Aceitam variáveis: `{primeiro_nome}`, `{nome}`,
+  `{empresa}`, `{cargo}`, `{cidade}`, `{etapa}`. Cadastre em *WhatsApp › Respostas rápidas*.
+- **Follow-ups integrados ao Kanban**
+  - **Regras por etapa:** "quando o lead entrar na etapa X, esperar N minutos/horas/dias e enviar esta
+    mensagem — e, se quiser, mover o lead para a etapa Y". Crie em *WhatsApp › Follow-ups automáticos*
+    ou pelo botão ⚡ no topo de cada coluna do Kanban.
+  - Arrastar o lead para a etapa agenda os follow-ups dela; tirar o lead da etapa cancela os pendentes.
+  - "Não enviar se o lead responder antes" cancela o envio quando chega mensagem do lead.
+  - Com "mover para", uma regra empurra o lead pelo funil (ex.: *Proposta Enviada* → 7 dias sem
+    resposta → *Sem interesse*), e a etapa nova pode ter as próprias regras, formando uma cadência.
+  - **Follow-up manual:** no modal do lead, agende uma mensagem para uma data e hora.
+  - O cartão do Kanban mostra o próximo follow-up ("Follow-up em 2 h"); a lista *Próximos envios*
+    permite enviar agora ou cancelar.
+  - **Janela de envio** (padrão 8h–21h, no fuso de `TZ`): fora dela os envios esperam. Os envios saem com
+    pausa de 4–7 s entre um e outro.
+  - Se o lead mandar só "PARAR", "SAIR", "STOP" ou "CANCELAR", ele é marcado como *Não contatar* e os
+    follow-ups pendentes são cancelados. Também dá para marcar à mão no lead.
+  - As regras de exemplo vêm **pausadas**: nada é enviado até você ativar uma regra.
+  - Os follow-ups só saem com o WhatsApp conectado e o servidor ligado; enquanto isso eles esperam.
 
 ## Como rodar
 
@@ -86,6 +106,7 @@ Coloque um proxy com HTTPS (Caddy, Nginx, Traefik) na frente se for expor na int
 - `server.mjs` — Express: API REST (`/api/leads`, `/api/whatsapp`, `/api/config`), eventos em tempo
   real (`/api/eventos`, Server-Sent Events) e o frontend estático.
 - `store.mjs` — leads e configurações em `data/leads.json` (escrita atômica) + validação dos campos.
+- `followups.mjs` — agenda de follow-ups (regras por etapa + manuais) e o laço que envia os vencidos a cada 30 s.
 - `whatsapp.mjs` — conexão WhatsApp Web multi-dispositivo via [Baileys](https://github.com/WhiskeySockets/Baileys),
   com login por QR Code e reconexão automática.
 - `public/` — HTML, CSS e JavaScript puro (sem etapa de build).

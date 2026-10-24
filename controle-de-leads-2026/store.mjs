@@ -1,5 +1,6 @@
 // Persistência simples em arquivo JSON (data/leads.json), com escrita atômica.
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -84,9 +85,83 @@ export function validarLead(entrada, { parcial = false, atual = {} } = {}) {
     if ("distrito" in entrada && d && !DISTRITOS.includes(d)) throw new ErroValidacao("Distrito inválido");
   }
 
+  if ("optOut" in entrada) {
+    if (typeof entrada.optOut !== "boolean") throw new ErroValidacao("optOut deve ser verdadeiro ou falso");
+    saida.optOut = entrada.optOut;
+  }
+
   if (!parcial && !saida.nome) throw new ErroValidacao("Nome é obrigatório");
   if (parcial && "nome" in saida && !saida.nome) throw new ErroValidacao("Nome é obrigatório");
   return saida;
+}
+
+const MINUTOS_MAX = 60 * 24 * 365;
+
+/** Resposta rápida: atalho (usado com "/" no chat), título e texto. */
+export function validarResposta(entrada, { parcial = false } = {}) {
+  if (!entrada || typeof entrada !== "object") throw new ErroValidacao("Corpo inválido");
+  const saida = {};
+  if ("atalho" in entrada || !parcial) {
+    const atalho = String(entrada.atalho || "").trim().toLowerCase().replace(/^\//, "");
+    if (!/^[a-z0-9_-]{1,30}$/.test(atalho)) throw new ErroValidacao("Atalho: use até 30 letras sem acento, números, - ou _");
+    saida.atalho = atalho;
+  }
+  if ("titulo" in entrada) saida.titulo = String(entrada.titulo || "").trim().slice(0, 80);
+  if ("texto" in entrada || !parcial) {
+    const texto = String(entrada.texto || "").trim();
+    if (!texto) throw new ErroValidacao("A resposta precisa de um texto");
+    saida.texto = texto.slice(0, 4000);
+  }
+  return saida;
+}
+
+/** Regra de follow-up: "lead na etapa X há N minutos → envia mensagem (e pode mover de etapa)". */
+export function validarRegra(entrada, { parcial = false } = {}) {
+  if (!entrada || typeof entrada !== "object") throw new ErroValidacao("Corpo inválido");
+  const saida = {};
+  if ("etapa" in entrada || !parcial) {
+    if (!ETAPAS.includes(entrada.etapa)) throw new ErroValidacao("Etapa do funil inválida");
+    saida.etapa = entrada.etapa;
+  }
+  if ("nome" in entrada) saida.nome = String(entrada.nome || "").trim().slice(0, 80);
+  if ("aposMinutos" in entrada || !parcial) {
+    const n = Number(entrada.aposMinutos);
+    if (!Number.isInteger(n) || n < 0 || n > MINUTOS_MAX) throw new ErroValidacao("Tempo de espera inválido");
+    saida.aposMinutos = n;
+  }
+  if ("texto" in entrada || !parcial) {
+    const texto = String(entrada.texto || "").trim();
+    if (!texto) throw new ErroValidacao("O follow-up precisa de uma mensagem");
+    saida.texto = texto.slice(0, 4000);
+  }
+  if ("moverPara" in entrada) {
+    if (entrada.moverPara && !ETAPAS.includes(entrada.moverPara)) throw new ErroValidacao("Etapa de destino inválida");
+    saida.moverPara = entrada.moverPara || "";
+  }
+  for (const campo of ["cancelarSeResponder", "ativo"]) {
+    if (campo in entrada) {
+      if (typeof entrada[campo] !== "boolean") throw new ErroValidacao(`${campo} deve ser verdadeiro ou falso`);
+      saida[campo] = entrada[campo];
+    }
+  }
+  if (saida.moverPara && saida.etapa && saida.moverPara === saida.etapa) {
+    throw new ErroValidacao("A etapa de destino deve ser diferente da etapa da regra");
+  }
+  return saida;
+}
+
+/** Troca {nome}, {primeiro_nome}, {empresa}… pelos dados do lead. */
+export function preencherVariaveis(texto, lead) {
+  const nome = (lead.nome || "").trim();
+  const valores = {
+    nome,
+    primeiro_nome: nome.split(/\s+/)[0] || "",
+    empresa: lead.empresa || "",
+    cargo: lead.cargo || "",
+    cidade: lead.cidade || "",
+    etapa: lead.etapa || "",
+  };
+  return String(texto || "").replace(/\{(\w+)\}/g, (todo, chave) => (chave in valores ? valores[chave] : todo));
 }
 
 /** Só dígitos. */
@@ -101,12 +176,18 @@ export function chaveTelefone(t) {
   return d;
 }
 
-export class Store {
+export class Store extends EventEmitter {
   constructor(dir) {
+    super();
     this.dir = dir;
     this.arquivo = path.join(dir, "leads.json");
     this.leads = [];
-    this.config = { autoCriarLeads: true };
+    this.config = {
+      autoCriarLeads: true,
+      janela: { inicio: 8, fim: 21 },
+      respostasRapidas: respostasDeExemplo(),
+      regrasFollowup: regrasDeExemplo(),
+    };
     this.fila = Promise.resolve();
   }
 
@@ -156,10 +237,15 @@ export class Store {
       faturamentoMensal: 0, cidade: "", pais: "", uf: "", distrito: "",
       etapa: "Novo Lead",
       mensagens: [],
+      followups: [],
+      optOut: false,
       ...dados,
       atualizadoEm: new Date().toISOString(),
     };
+    lead.etapaDesde = new Date().toISOString();
     this.leads.unshift(lead);
+    // Ouvintes síncronos (agenda de follow-ups) mexem no lead antes de salvar.
+    this.emit("etapa", lead, null);
     await this.salvar();
     return lead;
   }
@@ -167,9 +253,14 @@ export class Store {
   async atualizar(id, entrada) {
     const lead = this.obter(id);
     if (!lead) return undefined;
+    const anterior = lead.etapa;
     Object.assign(lead, validarLead(entrada, { parcial: true, atual: lead }), {
       atualizadoEm: new Date().toISOString(),
     });
+    if (lead.etapa !== anterior) {
+      lead.etapaDesde = new Date().toISOString();
+      this.emit("etapa", lead, anterior);
+    }
     await this.salvar();
     return lead;
   }
@@ -210,9 +301,79 @@ export class Store {
 
   async atualizarConfig(entrada) {
     if (typeof entrada?.autoCriarLeads === "boolean") this.config.autoCriarLeads = entrada.autoCriarLeads;
+    if (entrada?.janela) {
+      const inicio = Number(entrada.janela.inicio);
+      const fim = Number(entrada.janela.fim);
+      const hora = (h) => Number.isInteger(h) && h >= 0 && h <= 24;
+      if (!hora(inicio) || !hora(fim) || inicio >= fim) throw new ErroValidacao("Janela de envio inválida");
+      this.config.janela = { inicio, fim };
+    }
     await this.salvar();
     return this.config;
   }
+
+  // ---- respostas rápidas e regras de follow-up (CRUD genérico em config) ----
+  #colecao(nome) {
+    return nome === "respostas" ? this.config.respostasRapidas : this.config.regrasFollowup;
+  }
+
+  async criarItem(nome, entrada) {
+    const dados = nome === "respostas" ? validarResposta(entrada) : validarRegra(entrada);
+    const lista = this.#colecao(nome);
+    if (nome === "respostas" && lista.some((r) => r.atalho === dados.atalho)) {
+      throw new ErroValidacao(`Já existe uma resposta com o atalho /${dados.atalho}`);
+    }
+    const base = nome === "respostas" ? { titulo: "" } : { nome: "", moverPara: "", cancelarSeResponder: true, ativo: true };
+    const item = { id: randomUUID(), ...base, ...dados, criadoEm: new Date().toISOString() };
+    lista.push(item);
+    this.emit("config", nome, item);
+    await this.salvar();
+    return item;
+  }
+
+  async atualizarItem(nome, id, entrada) {
+    const item = this.#colecao(nome).find((i) => i.id === id);
+    if (!item) return undefined;
+    const dados = nome === "respostas" ? validarResposta(entrada, { parcial: true }) : validarRegra({ etapa: item.etapa, ...entrada }, { parcial: true });
+    if (nome === "respostas" && dados.atalho && this.#colecao(nome).some((r) => r.id !== id && r.atalho === dados.atalho)) {
+      throw new ErroValidacao(`Já existe uma resposta com o atalho /${dados.atalho}`);
+    }
+    Object.assign(item, dados);
+    this.emit("config", nome, item);
+    await this.salvar();
+    return item;
+  }
+
+  async excluirItem(nome, id) {
+    const lista = this.#colecao(nome);
+    const i = lista.findIndex((x) => x.id === id);
+    if (i < 0) return false;
+    const [item] = lista.splice(i, 1);
+    this.emit("config", nome, { ...item, excluido: true });
+    await this.salvar();
+    return true;
+  }
+}
+
+function respostasDeExemplo() {
+  const agora = new Date().toISOString();
+  return [
+    { id: randomUUID(), atalho: "ola", titulo: "Boas-vindas", texto: "Olá, {primeiro_nome}! Tudo bem? Obrigado pelo contato. Como posso te ajudar?", criadoEm: agora },
+    { id: randomUUID(), atalho: "reuniao", titulo: "Agendar reunião", texto: "{primeiro_nome}, que tal marcarmos uma conversa rápida de 20 minutos para eu entender melhor a {empresa}? Qual o melhor dia e horário para você?", criadoEm: agora },
+    { id: randomUUID(), atalho: "proposta", titulo: "Proposta enviada", texto: "{primeiro_nome}, acabei de te enviar a proposta. Qualquer dúvida, estou à disposição por aqui!", criadoEm: agora },
+    { id: randomUUID(), atalho: "obrigado", titulo: "Agradecimento", texto: "Muito obrigado, {primeiro_nome}! Foi um prazer falar com você.", criadoEm: agora },
+  ];
+}
+
+// Regras de exemplo nascem PAUSADAS: nada é enviado sem a pessoa ligar a regra.
+function regrasDeExemplo() {
+  const agora = new Date().toISOString();
+  const base = { cancelarSeResponder: true, ativo: false, criadoEm: agora };
+  return [
+    { id: randomUUID(), ...base, etapa: "Novo Lead", nome: "Primeiro contato", aposMinutos: 60, moverPara: "Atendimento Humano", texto: "Olá, {primeiro_nome}! Aqui é da equipe comercial. Vi o seu interesse e queria entender como podemos ajudar a {empresa}. Podemos conversar?" },
+    { id: randomUUID(), ...base, etapa: "Proposta Enviada", nome: "Lembrete da proposta", aposMinutos: 2 * 24 * 60, moverPara: "", texto: "Oi, {primeiro_nome}! Conseguiu dar uma olhada na proposta? Fico à disposição para tirar qualquer dúvida." },
+    { id: randomUUID(), ...base, etapa: "Proposta Enviada", nome: "Última tentativa", aposMinutos: 7 * 24 * 60, moverPara: "Sem interesse", texto: "{primeiro_nome}, como não tive retorno, vou encerrar a proposta por aqui. Se quiser retomar, é só me chamar!" },
+  ];
 }
 
 function exemplos() {

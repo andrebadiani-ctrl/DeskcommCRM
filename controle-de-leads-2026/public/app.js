@@ -244,6 +244,7 @@
       </div>
       ${l.empresa ? `<p><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M9 7h2M13 7h2M9 11h2M13 11h2M10 21v-4h4v4" /></svg>${esc(l.empresa)}${l.cargo ? ` · ${esc(l.cargo)}` : ""}</p>` : ""}
       ${local ? `<p><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>${esc(local)}</p>` : ""}
+      ${badgeFollowup(l)}
       <div class="cartao-rodape">
         <span class="valor">${moeda(l.faturamentoMensal, l.pais)}<small style="font-weight:500;color:var(--texto-suave)">/mês</small></span>
         <span class="data">${dataCurta(l.criadoEm)}</span>
@@ -252,13 +253,20 @@
     </article>`;
   }
 
+  function botaoRegrasDaEtapa(etapa) {
+    const daEtapa = (estado.config.regrasFollowup || []).filter((r) => r.etapa === etapa);
+    const ativas = daEtapa.filter((r) => r.ativo).length;
+    const titulo = daEtapa.length ? `${ativas} de ${daEtapa.length} follow-up(s) automático(s) ativo(s) nesta etapa` : "Criar follow-up automático para esta etapa";
+    return `<button type="button" class="regras-etapa${ativas ? " ativas" : ""}" data-regras-etapa="${esc(etapa)}" title="${titulo}"><svg viewBox="0 0 24 24"><path d="M13 3L5 13h6l-1 8 8-10h-6z" /></svg>${ativas || (daEtapa.length ? "0" : "+")}</button>`;
+  }
+
   function renderKanban() {
     const lista = leadsFiltrados();
     $("#kanban").innerHTML = ETAPAS.map((etapa) => {
       const doEstagio = lista.filter((l) => l.etapa === etapa);
       const soma = doEstagio.reduce((s, l) => s + (Number(l.faturamentoMensal) || 0), 0);
       return `<section class="coluna ${CLASSE_ETAPA[etapa]}" data-etapa="${esc(etapa)}">
-        <header class="coluna-topo"><span class="ponto"></span><h3>${esc(etapa)}</h3><span class="contagem">${doEstagio.length}</span></header>
+        <header class="coluna-topo"><span class="ponto"></span><h3>${esc(etapa)}</h3>${botaoRegrasDaEtapa(etapa)}<span class="contagem">${doEstagio.length}</span></header>
         <div class="coluna-soma">${moedaCompacta(soma)} em faturamento/mês</div>
         <div class="coluna-cartoes">${doEstagio.map(cartaoKanban).join("") || `<div class="coluna-vazia">Arraste leads para cá</div>`}</div>
       </section>`;
@@ -316,6 +324,7 @@
     $("#btn-wa-desconectar").hidden = status === "desconectado";
     $("#btn-wa-desconectar").textContent = status === "conectado" ? "Desconectar" : "Cancelar";
     $("#cfg-auto").checked = !!estado.config.autoCriarLeads;
+    renderAutomacao();
   }
 
   // ---------- dados ----------
@@ -324,7 +333,10 @@
     render();
     if (estado.leadAberto) {
       const atual = estado.leads.find((l) => l.id === estado.leadAberto);
-      if (atual) renderMensagens(atual);
+      if (atual) {
+        renderMensagens(atual);
+        renderFollowupsLead(atual);
+      }
     }
   }
 
@@ -514,6 +526,8 @@
   document.addEventListener("keydown", (e) => e.key === "Escape" && terminarArrasto(e, true));
 
   kanban.addEventListener("click", (e) => {
+    const botaoRegras = e.target.closest("[data-regras-etapa]");
+    if (botaoRegras) return abrirRegrasDaEtapa(botaoRegras.dataset.regrasEtapa);
     const cartao = e.target.closest(".cartao");
     if (!cartao || acabouDeArrastar || e.target.closest("select,.alca")) return;
     abrirModal(cartao.dataset.id);
@@ -567,6 +581,7 @@
     $("#btn-excluir").hidden = !lead;
     $("#bloco-nota").hidden = !lead;
     $("#bloco-wa").hidden = !lead;
+    $("#bloco-followups").hidden = !lead;
     $("#btn-salvar").textContent = lead ? "Salvar alterações" : "Criar lead";
 
     const v = lead || { pais: "", criadoEm: new Date().toISOString() };
@@ -575,7 +590,13 @@
     form.criadoEm.value = paraInputData(v.criadoEm);
     form.pais.value = v.pais || "";
     atualizarCamposRegiao(v.pais, v.uf, v.distrito);
-    if (lead) renderMensagens(lead);
+    if (lead) {
+      renderMensagens(lead);
+      renderAtalhos();
+      renderFollowupsLead(lead);
+      prepararAgendamento();
+    }
+    $("#wa-texto").value = "";
 
     modal.showModal();
     if (focoWhatsApp && lead) {
@@ -690,7 +711,438 @@
   }
   $("#btn-wa-enviar").addEventListener("click", enviarWhatsApp);
   $("#wa-texto").addEventListener("keydown", (e) => {
+    const sugestoes = caixaSugestoes.hidden ? [] : sugestoesVisiveis();
+    if (sugestoes.length && ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) {
+      e.preventDefault();
+      if (e.key === "Escape") return fecharSugestoes();
+      if (e.key === "Enter" || e.key === "Tab") {
+        return inserirNoChat(respostas().find((r) => r.id === sugestoes[sugestaoAtiva].dataset.usarResposta)?.texto || "");
+      }
+      sugestaoAtiva = (sugestaoAtiva + (e.key === "ArrowDown" ? 1 : -1) + sugestoes.length) % sugestoes.length;
+      sugestoes.forEach((s, i) => s.classList.toggle("ativa", i === sugestaoAtiva));
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviarWhatsApp(); }
+  });
+
+  // ---------- respostas rápidas e follow-ups ----------
+  const ICONE_RELOGIO = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>`;
+  const ICONE_RAIO = `<svg viewBox="0 0 24 24"><path d="M13 3L5 13h6l-1 8 8-10h-6z" /></svg>`;
+  const respostas = () => estado.config.respostasRapidas || [];
+  const regras = () => estado.config.regrasFollowup || [];
+
+  // Mesma regra do servidor (store.mjs → preencherVariaveis).
+  function preencherVariaveis(texto, lead) {
+    const nome = (lead?.nome || "").trim();
+    const valores = { nome, primeiro_nome: nome.split(/\s+/)[0] || "", empresa: lead?.empresa || "", cargo: lead?.cargo || "", cidade: lead?.cidade || "", etapa: lead?.etapa || "" };
+    return String(texto || "").replace(/\{(\w+)\}/g, (todo, chave) => (chave in valores ? valores[chave] : todo));
+  }
+
+  function descreverEspera(min) {
+    if (!min) return "na hora";
+    if (min % 1440 === 0) return `${min / 1440} dia${min === 1440 ? "" : "s"}`;
+    if (min % 60 === 0) return `${min / 60} h`;
+    return `${min} min`;
+  }
+
+  function relativo(iso) {
+    const min = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+    if (min <= 0) return "agora";
+    if (min < 60) return `em ${min} min`;
+    if (min < 1440) return `em ${Math.round(min / 60)} h`;
+    const d = Math.round(min / 1440);
+    return `em ${d} dia${d === 1 ? "" : "s"}`;
+  }
+  const dataHora = (iso) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  const proximoFollowup = (l) =>
+    (l.followups || []).filter((f) => f.status === "pendente").sort((a, b) => new Date(a.agendadoPara) - new Date(b.agendadoPara))[0];
+
+  function badgeFollowup(l) {
+    if (l.optOut) return `<p class="selo-fu bloqueado" title="O lead pediu para não receber mensagens automáticas">Não contatar</p>`;
+    const f = proximoFollowup(l);
+    if (!f) return "";
+    const pendentes = (l.followups || []).filter((x) => x.status === "pendente").length;
+    return `<p class="selo-fu" title="Próximo follow-up: ${esc(dataHora(f.agendadoPara))}">${ICONE_RELOGIO}Follow-up ${relativo(f.agendadoPara)}${pendentes > 1 ? ` · +${pendentes - 1}` : ""}</p>`;
+  }
+
+  function textoDoFollowup(f, lead) {
+    if (f.status === "enviado" && f.texto) return f.texto;
+    const regra = f.regraId ? regras().find((r) => r.id === f.regraId) : null;
+    return preencherVariaveis(regra ? regra.texto : f.texto, lead);
+  }
+  function origemDoFollowup(f) {
+    if (f.origem !== "regra") return "Manual";
+    const regra = regras().find((r) => r.id === f.regraId);
+    return regra ? `Regra “${regra.nome || regra.etapa}”` : "Regra excluída";
+  }
+
+  // ---- aba WhatsApp: listas ----
+  function renderRespostas() {
+    const lista = respostas();
+    $("#lista-respostas").innerHTML = lista.length
+      ? lista.map((r) => `<div class="item" data-resposta="${r.id}">
+          <div class="item-corpo"><strong><code>/${esc(r.atalho)}</code> ${esc(r.titulo || "")}</strong><span>${esc(r.texto)}</span></div>
+          <button class="icone-btn" data-editar-resposta="${r.id}" title="Editar"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z" /></svg></button>
+        </div>`).join("")
+      : `<p class="sem-msg">Nenhuma resposta rápida ainda.</p>`;
+  }
+
+  function itemRegra(r) {
+    return `<div class="item regra ${r.ativo ? "" : "pausada"}">
+      <label class="interruptor mini" title="${r.ativo ? "Pausar" : "Ativar"}"><input type="checkbox" data-ativar-regra="${r.id}" ${r.ativo ? "checked" : ""} /><span class="trilho"></span></label>
+      <div class="item-corpo">
+        <strong>${esc(r.nome || "Follow-up")} <span class="tag">${r.ativo ? "ativa" : "pausada"}</span></strong>
+        <span class="fluxo">Após <b>${descreverEspera(r.aposMinutos)}</b> na etapa → envia mensagem${r.moverPara ? ` → move para <b>${esc(r.moverPara)}</b>` : ""}${r.cancelarSeResponder ? " · para se o lead responder" : ""}</span>
+        <span>${esc(r.texto)}</span>
+      </div>
+      <button class="icone-btn" data-editar-regra="${r.id}" title="Editar"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z" /></svg></button>
+    </div>`;
+  }
+
+  function listaRegras(etapa) {
+    const ordenadas = (lista) => [...lista].sort((a, b) => a.aposMinutos - b.aposMinutos);
+    if (etapa) {
+      const daEtapa = ordenadas(regras().filter((r) => r.etapa === etapa));
+      return daEtapa.length ? daEtapa.map(itemRegra).join("") : `<p class="sem-msg">Nenhuma regra nesta etapa ainda.</p>`;
+    }
+    const grupos = ETAPAS.map((e) => [e, ordenadas(regras().filter((r) => r.etapa === e))]).filter(([, rs]) => rs.length);
+    return grupos.length
+      ? grupos.map(([e, rs]) => `<div class="grupo-etapa ${CLASSE_ETAPA[e]}"><h4><span class="ponto"></span>${esc(e)}</h4>${rs.map(itemRegra).join("")}</div>`).join("")
+      : `<p class="sem-msg">Nenhuma regra criada. Clique em “Nova regra”.</p>`;
+  }
+
+  function renderProximos() {
+    const pendentes = estado.leads
+      .flatMap((l) => (l.followups || []).filter((f) => f.status === "pendente").map((f) => ({ l, f })))
+      .sort((a, b) => new Date(a.f.agendadoPara) - new Date(b.f.agendadoPara));
+    const wa = estado.whatsapp.status === "conectado";
+    $("#proximos-resumo").textContent = !pendentes.length
+      ? "Nenhum follow-up agendado."
+      : `${pendentes.length} agendado${pendentes.length === 1 ? "" : "s"}${wa ? "" : " · aguardando o WhatsApp conectar para enviar"}`;
+    $("#lista-proximos").innerHTML = pendentes.slice(0, 50).map(({ l, f }) => `<div class="item">
+        <div class="item-corpo">
+          <strong><a href="#" data-abrir-lead="${l.id}">${esc(l.nome)}</a> <span class="tag">${relativo(f.agendadoPara)}</span></strong>
+          <span class="fluxo">${esc(dataHora(f.agendadoPara))} · ${esc(origemDoFollowup(f))}${f.motivo ? ` · <em>${esc(f.motivo)}</em>` : ""}</span>
+          <span>${esc(textoDoFollowup(f, l))}</span>
+        </div>
+        <div class="item-acoes">
+          <button class="btn btn-secundario mini" data-fu-enviar="${f.id}" data-lead="${l.id}" ${wa ? "" : "disabled"}>Enviar agora</button>
+          <button class="btn btn-fantasma mini" data-fu-cancelar="${f.id}" data-lead="${l.id}">Cancelar</button>
+        </div>
+      </div>`).join("") || `<p class="sem-msg">Quando uma regra ou um agendamento manual criar um follow-up, ele aparece aqui.</p>`;
+  }
+
+  function renderAutomacao() {
+    renderRespostas();
+    renderProximos();
+    $("#lista-regras").innerHTML = listaRegras();
+    const { inicio, fim } = estado.config.janela || { inicio: 8, fim: 21 };
+    const horas = (sel) => Array.from({ length: 25 }, (_, h) => `<option value="${h}"${h === sel ? " selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("");
+    $("#janela-inicio").innerHTML = horas(inicio);
+    $("#janela-fim").innerHTML = horas(fim);
+  }
+
+  async function recarregarConfig() {
+    estado.config = await api("GET", "/api/config");
+    render();
+    if (modalEtapa.open) $("#etapa-regras").innerHTML = listaRegras(etapaDoModal);
+    if (estado.leadAberto) renderFollowupsLead(estado.leads.find((l) => l.id === estado.leadAberto));
+  }
+
+  async function janelaMudou() {
+    try {
+      estado.config = await api("PATCH", "/api/config", { janela: { inicio: Number($("#janela-inicio").value), fim: Number($("#janela-fim").value) } });
+      toast("Janela de envio atualizada");
+    } catch (err) {
+      toast(err.message, true);
+      renderAutomacao();
+    }
+  }
+  $("#janela-inicio").addEventListener("change", janelaMudou);
+  $("#janela-fim").addEventListener("change", janelaMudou);
+
+  // ações em listas (aba WhatsApp, modal da etapa e modal do lead)
+  async function acaoFollowup(botao) {
+    const leadId = botao.dataset.lead;
+    const enviar = "fuEnviar" in botao.dataset;
+    const fid = enviar ? botao.dataset.fuEnviar : botao.dataset.fuCancelar;
+    if (!enviar && !confirm("Cancelar este follow-up?")) return;
+    botao.disabled = true;
+    try {
+      const lead = enviar ? await api("POST", `/api/leads/${leadId}/followups/${fid}/enviar`) : await api("DELETE", `/api/leads/${leadId}/followups/${fid}`);
+      substituir(lead);
+      render();
+      if (estado.leadAberto === leadId) { renderFollowupsLead(lead); renderMensagens(lead); }
+      toast(enviar ? "Follow-up enviado" : "Follow-up cancelado");
+    } catch (err) {
+      toast(err.message, true);
+      botao.disabled = false;
+    }
+  }
+
+  document.addEventListener("click", (e) => {
+    const alvo = e.target.closest("[data-editar-resposta],[data-editar-regra],[data-fu-enviar],[data-fu-cancelar],[data-abrir-lead]");
+    if (!alvo) return;
+    if (alvo.dataset.editarResposta) abrirResposta(alvo.dataset.editarResposta);
+    else if (alvo.dataset.editarRegra) abrirRegra(alvo.dataset.editarRegra);
+    else if (alvo.dataset.abrirLead) { e.preventDefault(); abrirModal(alvo.dataset.abrirLead); }
+    else acaoFollowup(alvo);
+  });
+  document.addEventListener("change", async (e) => {
+    const id = e.target.dataset?.ativarRegra;
+    if (!id) return;
+    try {
+      await api("PATCH", `/api/regras/${id}`, { ativo: e.target.checked });
+      toast(e.target.checked ? "Regra ativada — vale para leads que entrarem na etapa" : "Regra pausada e envios pendentes dela cancelados");
+      await recarregarConfig();
+      await carregarLeads();
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      toast(err.message, true);
+    }
+  });
+
+  // ---- editor de resposta rápida ----
+  const modalResposta = $("#modal-resposta");
+  const formResposta = $("#form-resposta");
+  let respostaEditada = null;
+
+  function abrirResposta(id = null) {
+    const r = id ? respostas().find((x) => x.id === id) : null;
+    respostaEditada = r?.id || null;
+    formResposta.reset();
+    $("#resposta-titulo").textContent = r ? "Editar resposta rápida" : "Nova resposta rápida";
+    $("#btn-excluir-resposta").hidden = !r;
+    formResposta.atalho.value = r?.atalho || "";
+    formResposta.titulo.value = r?.titulo || "";
+    formResposta.texto.value = r?.texto || "";
+    modalResposta.showModal();
+    formResposta.atalho.focus();
+  }
+  $("#btn-nova-resposta").addEventListener("click", () => abrirResposta());
+  formResposta.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const dados = { atalho: formResposta.atalho.value, titulo: formResposta.titulo.value, texto: formResposta.texto.value };
+    try {
+      await (respostaEditada ? api("PATCH", `/api/respostas/${respostaEditada}`, dados) : api("POST", "/api/respostas", dados));
+      modalResposta.close();
+      toast("Resposta rápida salva");
+      await recarregarConfig();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  $("#btn-excluir-resposta").addEventListener("click", async () => {
+    if (!confirm("Excluir esta resposta rápida?")) return;
+    try {
+      await api("DELETE", `/api/respostas/${respostaEditada}`);
+      modalResposta.close();
+      toast("Resposta excluída");
+      await recarregarConfig();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  // ---- editor de regra de follow-up ----
+  const modalRegra = $("#modal-regra");
+  const formRegra = $("#form-regra");
+  let regraEditada = null;
+
+  function abrirRegra(id = null, etapa = "") {
+    const r = id ? regras().find((x) => x.id === id) : null;
+    regraEditada = r?.id || null;
+    formRegra.reset();
+    $("#regra-titulo").textContent = r ? "Editar regra de follow-up" : "Nova regra de follow-up";
+    $("#btn-excluir-regra").hidden = !r;
+    formRegra.etapa.innerHTML = opcoesEtapa(r?.etapa || etapa || "Novo Lead");
+    formRegra.moverPara.innerHTML = `<option value="">Não mover (continua na etapa)</option>` + ETAPAS.map((e) => `<option${e === r?.moverPara ? " selected" : ""}>${esc(e)}</option>`).join("");
+    formRegra.nome.value = r?.nome || "";
+    formRegra.texto.value = r?.texto || "";
+    const min = r ? r.aposMinutos : 60;
+    const unidade = min && min % 1440 === 0 ? 1440 : min && min % 60 === 0 ? 60 : min ? 1 : 60;
+    formRegra.unidade.value = String(unidade);
+    formRegra.quantidade.value = String(min / unidade);
+    formRegra.cancelarSeResponder.checked = r ? r.cancelarSeResponder : true;
+    formRegra.ativo.checked = r ? r.ativo : true;
+    modalRegra.showModal();
+    formRegra.nome.focus();
+  }
+  $("#btn-nova-regra").addEventListener("click", () => abrirRegra());
+  formRegra.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const quantidade = Number(formRegra.quantidade.value);
+    if (!Number.isFinite(quantidade) || quantidade < 0) { toast("Tempo de espera inválido", true); return; }
+    const dados = {
+      etapa: formRegra.etapa.value,
+      nome: formRegra.nome.value,
+      aposMinutos: Math.round(quantidade * Number(formRegra.unidade.value)),
+      texto: formRegra.texto.value,
+      moverPara: formRegra.moverPara.value,
+      cancelarSeResponder: formRegra.cancelarSeResponder.checked,
+      ativo: formRegra.ativo.checked,
+    };
+    try {
+      await (regraEditada ? api("PATCH", `/api/regras/${regraEditada}`, dados) : api("POST", "/api/regras", dados));
+      modalRegra.close();
+      toast(regraEditada ? "Regra atualizada" : "Regra criada — vale para leads que entrarem na etapa");
+      await recarregarConfig();
+      await carregarLeads();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  $("#btn-excluir-regra").addEventListener("click", async () => {
+    if (!confirm("Excluir esta regra? Os envios pendentes dela serão cancelados.")) return;
+    try {
+      await api("DELETE", `/api/regras/${regraEditada}`);
+      modalRegra.close();
+      toast("Regra excluída");
+      await recarregarConfig();
+      await carregarLeads();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  // ---- regras de uma etapa, aberto pelo cabeçalho da coluna do Kanban ----
+  const modalEtapa = $("#modal-etapa");
+  let etapaDoModal = "";
+  function abrirRegrasDaEtapa(etapa) {
+    etapaDoModal = etapa;
+    $("#etapa-titulo").textContent = `Follow-ups: ${etapa}`;
+    $("#etapa-regras").innerHTML = listaRegras(etapa);
+    modalEtapa.showModal();
+  }
+  $("#btn-etapa-nova-regra").addEventListener("click", () => abrirRegra(null, etapaDoModal));
+
+  // fechar e variáveis nos três diálogos novos
+  for (const dlg of [modalResposta, modalRegra, modalEtapa]) {
+    $$("[data-fechar]", dlg).forEach((b) => b.addEventListener("click", () => dlg.close()));
+    dlg.addEventListener("click", (e) => {
+      if (e.target === dlg) dlg.close();
+      const codigo = e.target.closest(".variaveis code");
+      if (codigo) {
+        const area = $("textarea[name=texto]", dlg);
+        const ini = area.selectionStart ?? area.value.length;
+        area.setRangeText(codigo.textContent, ini, area.selectionEnd ?? ini, "end");
+        area.focus();
+      }
+    });
+  }
+
+  // ---- no modal do lead: respostas rápidas no chat ----
+  function inserirNoChat(texto) {
+    const lead = estado.leads.find((l) => l.id === estado.leadAberto);
+    const campo = $("#wa-texto");
+    campo.value = preencherVariaveis(texto, lead);
+    fecharSugestoes();
+    campo.focus();
+    campo.setSelectionRange(campo.value.length, campo.value.length);
+  }
+
+  function renderAtalhos() {
+    $("#atalhos-respostas").innerHTML = respostas()
+      .map((r) => `<button type="button" class="chip" data-usar-resposta="${r.id}" title="${esc(r.texto)}">${ICONE_RAIO}/${esc(r.atalho)}</button>`)
+      .join("");
+  }
+  $("#atalhos-respostas").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-usar-resposta]");
+    if (b) inserirNoChat(respostas().find((r) => r.id === b.dataset.usarResposta)?.texto || "");
+  });
+
+  let sugestaoAtiva = 0;
+  const caixaSugestoes = $("#sugestoes");
+  function fecharSugestoes() {
+    caixaSugestoes.hidden = true;
+    caixaSugestoes.innerHTML = "";
+  }
+  function sugestoesVisiveis() {
+    return $$(".sugestao", caixaSugestoes);
+  }
+  $("#wa-texto").addEventListener("input", (e) => {
+    const m = e.target.value.match(/^\/(\S*)$/);
+    if (!m) return fecharSugestoes();
+    const termo = normalizar(m[1]);
+    const achadas = respostas().filter((r) => normalizar(r.atalho + " " + r.titulo).includes(termo)).slice(0, 8);
+    if (!achadas.length) return fecharSugestoes();
+    sugestaoAtiva = 0;
+    caixaSugestoes.innerHTML = achadas
+      .map((r, i) => `<div class="sugestao${i === 0 ? " ativa" : ""}" role="option" data-usar-resposta="${r.id}"><strong>/${esc(r.atalho)}</strong> ${esc(r.titulo || "")}<span>${esc(r.texto)}</span></div>`)
+      .join("");
+    caixaSugestoes.hidden = false;
+  });
+  caixaSugestoes.addEventListener("mousedown", (e) => {
+    const s = e.target.closest("[data-usar-resposta]");
+    if (!s) return;
+    e.preventDefault();
+    inserirNoChat(respostas().find((r) => r.id === s.dataset.usarResposta)?.texto || "");
+  });
+  $("#wa-texto").addEventListener("blur", () => setTimeout(fecharSugestoes, 100));
+
+  // ---- no modal do lead: follow-ups ----
+  function renderFollowupsLead(lead) {
+    if (!lead) return;
+    const lista = [...(lead.followups || [])].sort((a, b) => {
+      if ((a.status === "pendente") !== (b.status === "pendente")) return a.status === "pendente" ? -1 : 1;
+      return a.status === "pendente" ? new Date(a.agendadoPara) - new Date(b.agendadoPara) : new Date(b.encerradoEm || 0) - new Date(a.encerradoEm || 0);
+    }).slice(0, 12);
+    const ROTULO = { pendente: "agendado", enviado: "enviado", cancelado: "cancelado", falhou: "falhou" };
+    $("#followups-lead").innerHTML = lista.length
+      ? lista.map((f) => `<div class="item fu-${f.status}">
+          <div class="item-corpo">
+            <strong><span class="tag">${ROTULO[f.status]}</span> ${f.status === "pendente" ? `${esc(dataHora(f.agendadoPara))} (${relativo(f.agendadoPara)})` : esc(dataHora(f.encerradoEm || f.agendadoPara))}</strong>
+            <span class="fluxo">${esc(origemDoFollowup(f))}${f.motivo ? ` · ${esc(f.motivo)}` : ""}</span>
+            <span>${esc(textoDoFollowup(f, lead))}</span>
+          </div>
+          ${f.status === "pendente" ? `<div class="item-acoes">
+            <button type="button" class="btn btn-secundario mini" data-fu-enviar="${f.id}" data-lead="${lead.id}" ${estado.whatsapp.status === "conectado" ? "" : "disabled"}>Enviar agora</button>
+            <button type="button" class="btn btn-fantasma mini" data-fu-cancelar="${f.id}" data-lead="${lead.id}">Cancelar</button>
+          </div>` : ""}
+        </div>`).join("")
+      : `<p class="sem-msg">Nenhum follow-up para este lead. Agende um abaixo ou crie regras para a etapa <b>${esc(lead.etapa)}</b>.</p>`;
+    $("#fu-optout").checked = !!lead.optOut;
+  }
+
+  function prepararAgendamento() {
+    $("#fu-modelo").innerHTML = `<option value="">Usar resposta rápida…</option>` + respostas().map((r) => `<option value="${r.id}">/${esc(r.atalho)} ${esc(r.titulo || "")}</option>`).join("");
+    const amanha = new Date(Date.now() + 86400000);
+    amanha.setHours(9, 0, 0, 0);
+    $("#fu-quando").value = new Date(amanha.getTime() - amanha.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    $("#fu-texto").value = "";
+    $("#fu-cancelar").checked = true;
+  }
+  $("#fu-modelo").addEventListener("change", (e) => {
+    const r = respostas().find((x) => x.id === e.target.value);
+    if (r) $("#fu-texto").value = r.texto;
+    e.target.value = "";
+  });
+  $("#btn-fu-agendar").addEventListener("click", async () => {
+    const texto = $("#fu-texto").value.trim();
+    const quando = $("#fu-quando").value;
+    if (!texto) { $("#fu-texto").focus(); toast("Escreva a mensagem do follow-up", true); return; }
+    if (!quando) { toast("Escolha data e hora", true); return; }
+    try {
+      const lead = await api("POST", `/api/leads/${estado.leadAberto}/followups`, { texto, agendadoPara: new Date(quando).toISOString(), cancelarSeResponder: $("#fu-cancelar").checked });
+      substituir(lead);
+      renderFollowupsLead(lead);
+      prepararAgendamento();
+      render();
+      toast("Follow-up agendado");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  $("#fu-optout").addEventListener("change", async (e) => {
+    try {
+      const lead = await salvarCampo(estado.leadAberto, { optOut: e.target.checked });
+      renderFollowupsLead(lead);
+      render();
+      toast(e.target.checked ? "Este lead não receberá follow-ups automáticos" : "Follow-ups automáticos liberados para este lead");
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      toast(err.message, true);
+    }
   });
 
   // ---------- topo, abas e filtros ----------
@@ -813,6 +1265,7 @@
       render();
       if (estado.leadAberto) atualizarAvisoWhatsApp(estado.leads.find((l) => l.id === estado.leadAberto));
     });
+    fonte.addEventListener("config", () => recarregarConfig().catch(() => {}));
     fonte.addEventListener("leads", () => {
       clearTimeout(esperaRecarga);
       esperaRecarga = setTimeout(() => carregarLeads().catch(() => {}), 150);

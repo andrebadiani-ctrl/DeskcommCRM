@@ -149,6 +149,47 @@
           </div>
         </div>
       </div>
+
+      <div class="auto-grade">
+        <div class="wa-cartao bloco" id="secao-respostas">
+          <div class="bloco-topo">
+            <div>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3L5 13h6l-1 8 8-10h-6z" /></svg>Respostas rápidas</h2>
+              <p>Modelos de mensagem. No chat do lead, digite <kbd>/</kbd> para usar.</p>
+            </div>
+            <button class="btn btn-secundario" id="btn-nova-resposta">+ Nova resposta</button>
+          </div>
+          <div class="lista" id="lista-respostas"></div>
+        </div>
+
+        <div class="wa-cartao bloco" id="secao-proximos">
+          <div class="bloco-topo">
+            <div>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>Próximos envios</h2>
+              <p id="proximos-resumo">Follow-ups agendados para os seus leads.</p>
+            </div>
+          </div>
+          <div class="lista" id="lista-proximos"></div>
+        </div>
+
+        <div class="wa-cartao bloco largo" id="secao-regras">
+          <div class="bloco-topo">
+            <div>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 12h10v4H4zM4 20h6" /></svg>Follow-ups automáticos por etapa do Kanban</h2>
+              <p>Quando um lead <strong>entra</strong> numa etapa, as regras dela são agendadas. Se ele mudar de etapa antes, o envio é cancelado.</p>
+            </div>
+            <button class="btn btn-secundario" id="btn-nova-regra">+ Nova regra</button>
+          </div>
+          <div class="janela">
+            <span>Enviar só entre</span>
+            <select id="janela-inicio" aria-label="Início da janela de envio"></select>
+            <span>e</span>
+            <select id="janela-fim" aria-label="Fim da janela de envio"></select>
+            <span class="dica">— fora desse horário, os envios esperam a janela abrir.</span>
+          </div>
+          <div id="lista-regras"></div>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -191,11 +232,30 @@
             WhatsApp
           </h3>
           <div class="mensagens" id="mensagens"></div>
+          <div class="atalhos" id="atalhos-respostas"></div>
           <div class="enviar">
-            <textarea id="wa-texto" rows="2" placeholder="Escreva uma mensagem…" maxlength="4000"></textarea>
+            <div class="campo-com-sugestoes">
+              <textarea id="wa-texto" rows="2" placeholder="Escreva uma mensagem… (digite / para respostas rápidas)" maxlength="4000"></textarea>
+              <div class="sugestoes" id="sugestoes" role="listbox" hidden></div>
+            </div>
             <button type="button" class="btn btn-primario" id="btn-wa-enviar">Enviar</button>
           </div>
           <p class="dica" id="wa-aviso-modal"></p>
+        </div>
+
+        <div class="historico" id="bloco-followups" hidden>
+          <h3><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>Follow-ups deste lead</h3>
+          <div class="lista compacta" id="followups-lead"></div>
+          <div class="agendar">
+            <textarea id="fu-texto" rows="2" placeholder="Mensagem do follow-up (aceita {primeiro_nome}, {empresa}…)" maxlength="4000"></textarea>
+            <div class="agendar-linha">
+              <select id="fu-modelo" aria-label="Usar resposta rápida"><option value="">Usar resposta rápida…</option></select>
+              <input id="fu-quando" type="datetime-local" aria-label="Quando enviar" />
+              <button type="button" class="btn btn-secundario" id="btn-fu-agendar">Agendar</button>
+            </div>
+            <label class="check"><input type="checkbox" id="fu-cancelar" checked /> Cancelar se o lead responder antes</label>
+          </div>
+          <label class="check optout"><input type="checkbox" id="fu-optout" /> Não enviar follow-ups automáticos para este lead</label>
         </div>
       </div>
       <div class="modal-rodape">
@@ -205,6 +265,83 @@
         <button type="submit" class="btn btn-primario" id="btn-salvar">Salvar</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Resposta rápida -->
+  <dialog id="modal-resposta" class="modal modal-pequeno">
+    <form id="form-resposta" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="resposta-titulo">Nova resposta rápida</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label>Atalho *<span class="prefixo"><span>/</span><input name="atalho" maxlength="30" placeholder="ola" autocomplete="off" /></span></label>
+          <label>Título<input name="titulo" maxlength="80" placeholder="Boas-vindas" /></label>
+          <label class="largo">Mensagem *<textarea name="texto" rows="5" maxlength="4000"></textarea></label>
+        </div>
+        <p class="dica variaveis">Variáveis: <code>{primeiro_nome}</code> <code>{nome}</code> <code>{empresa}</code> <code>{cargo}</code> <code>{cidade}</code> <code>{etapa}</code> — clique para inserir.</p>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="btn-excluir-resposta" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Regra de follow-up -->
+  <dialog id="modal-regra" class="modal modal-pequeno">
+    <form id="form-regra" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="regra-titulo">Nova regra de follow-up</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label>Quando o lead estiver na etapa<select name="etapa"></select></label>
+          <label>Nome da regra<input name="nome" maxlength="80" placeholder="Lembrete da proposta" /></label>
+          <label class="largo">Esperar
+            <span class="tempo">
+              <input name="quantidade" type="number" min="0" step="1" value="1" />
+              <select name="unidade"><option value="1">minutos</option><option value="60" selected>horas</option><option value="1440">dias</option></select>
+              <span>e então enviar:</span>
+            </span>
+          </label>
+          <label class="largo">Mensagem *<textarea name="texto" rows="5" maxlength="4000"></textarea></label>
+          <label class="largo">Depois de enviar, mover o lead para
+            <select name="moverPara"></select>
+          </label>
+        </div>
+        <p class="dica variaveis">Variáveis: <code>{primeiro_nome}</code> <code>{nome}</code> <code>{empresa}</code> <code>{cargo}</code> <code>{cidade}</code> <code>{etapa}</code> — clique para inserir.</p>
+        <label class="check"><input type="checkbox" name="cancelarSeResponder" checked /> Não enviar se o lead responder antes</label>
+        <label class="check"><input type="checkbox" name="ativo" checked /> Regra ativa</label>
+        <p class="dica">A regra vale para os leads que <strong>entrarem</strong> na etapa a partir de agora.</p>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="btn-excluir-regra" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar regra</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Follow-ups de uma etapa (aberto pelo Kanban) -->
+  <dialog id="modal-etapa" class="modal modal-pequeno">
+    <div class="modal-topo">
+      <h2 id="etapa-titulo">Follow-ups da etapa</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo">
+      <p class="dica">Quando um lead entra nesta etapa, estas mensagens são agendadas automaticamente.</p>
+      <div id="etapa-regras"></div>
+    </div>
+    <div class="modal-rodape">
+      <span class="espaco"></span>
+      <button type="button" class="btn btn-primario" id="btn-etapa-nova-regra">+ Nova regra nesta etapa</button>
+    </div>
   </dialog>
 
   <div class="toasts" id="toasts" aria-live="polite"></div>
