@@ -38,6 +38,28 @@ APP_PASSWORD="uma-senha-forte" npm start
 # abra http://localhost:3000  (usuário: qualquer um; senha: a de APP_PASSWORD)
 ```
 
+### Na rede local (Wi-Fi / cabo)
+
+O servidor aceita conexões de qualquer aparelho da mesma rede. Ao iniciar, ele mostra os endereços:
+
+```
+Controle de Leads 2026 rodando em http://localhost:3000
+Na rede local: http://192.168.0.15:3000
+```
+
+Abra esse endereço `http://192.168.x.x:3000` no celular ou em outro computador conectado à mesma
+rede. Se não abrir:
+
+- **Windows:** na primeira execução, permita o Node.js no aviso do Firewall (marque "Redes privadas"),
+  ou libere a porta 3000 em *Firewall do Windows › Configurações avançadas › Regras de entrada*.
+- **Linux:** `sudo ufw allow 3000/tcp` (se o ufw estiver ativo).
+- **macOS:** aceite "Permitir conexões de entrada" para o `node` quando o sistema perguntar.
+- Confira se a rede do Wi-Fi não é de "convidados" (essas costumam isolar um aparelho do outro).
+- Para o endereço não mudar, fixe o IP do computador no roteador (reserva de DHCP).
+
+O computador que roda o servidor precisa ficar ligado; o WhatsApp conectado continua funcionando
+enquanto o servidor estiver de pé. Mesmo em rede local, defina `APP_PASSWORD`.
+
 ### Com Docker (VPS)
 
 ```bash

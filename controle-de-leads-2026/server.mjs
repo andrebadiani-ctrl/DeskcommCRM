@@ -1,5 +1,6 @@
 // Controle de Leads 2026 — servidor HTTP (API REST + eventos em tempo real + frontend estático).
 import { timingSafeEqual } from "node:crypto";
+import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -146,6 +147,12 @@ app.use((erro, _req, res, _next) => {
 
 app.listen(PORTA, () => {
   console.info(`Controle de Leads 2026 rodando em http://localhost:${PORTA}`);
+  // Endereços para abrir de outros aparelhos da mesma rede (celular, outro computador).
+  const ipsDaRede = Object.values(networkInterfaces())
+    .flat()
+    .filter((i) => i && i.family === "IPv4" && !i.internal)
+    .map((i) => i.address);
+  for (const ip of ipsDaRede) console.info(`Na rede local: http://${ip}:${PORTA}`);
   if (!SENHA) console.warn("Aviso: APP_PASSWORD não definida — o painel está sem senha.");
   whatsapp.iniciarSeHouverSessao().catch((e) => console.error("WhatsApp:", e));
 });
