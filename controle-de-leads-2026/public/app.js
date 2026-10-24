@@ -77,6 +77,15 @@
     if (!isoAtual) nova.setHours(12, 0, 0, 0);
     return nova.toISOString();
   }
+  // 5511987654321 → +55 11 98765-4321 · 351912345678 → +351 912 345 678
+  function formatarTelefone(numero) {
+    const d = String(numero || "").replace(/\D/g, "");
+    let m = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);
+    if (m) return `+55 ${m[1]} ${m[2]}-${m[3]}`;
+    m = d.match(/^351(\d{3})(\d{3})(\d{3})$/);
+    if (m) return `+351 ${m[1]} ${m[2]} ${m[3]}`;
+    return d ? "+" + d : "";
+  }
   const regiaoDe = (l) => (l.pais === "Brasil" ? l.uf : l.pais === "Portugal" ? l.distrito : "");
 
   function toast(mensagem, erro = false) {
@@ -288,7 +297,7 @@
     let caixa;
     if (status === "conectado") {
       caixa = `<div class="wa-qr-conectado"><div class="circulo"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10" /></svg></div>
-        <strong>WhatsApp conectado</strong><span>${conta?.nome ? esc(conta.nome) + "<br />" : ""}${conta?.numero ? "+" + esc(conta.numero) : ""}</span></div>`;
+        <strong>WhatsApp conectado</strong><span>${conta?.nome ? esc(conta.nome) + "<br />" : ""}${conta?.numero ? esc(formatarTelefone(conta.numero)) : ""}</span></div>`;
     } else if (status === "aguardando_qr" && qr) {
       caixa = `<img src="${qr}" alt="QR Code para conectar o WhatsApp" />`;
     } else if (status === "conectando" || status === "reconectando") {
@@ -302,6 +311,7 @@
       : status === "conectado"
         ? "Tudo pronto: envie mensagens pelos leads e receba as respostas no histórico."
         : "Conecte o seu WhatsApp lendo o QR Code com o celular.";
+    $("#wa-instrucoes").hidden = status === "conectado";
     $("#btn-wa-conectar").hidden = status !== "desconectado";
     $("#btn-wa-desconectar").hidden = status === "desconectado";
     $("#btn-wa-desconectar").textContent = status === "conectado" ? "Desconectar" : "Cancelar";
