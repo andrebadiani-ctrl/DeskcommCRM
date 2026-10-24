@@ -112,10 +112,42 @@ export class Conversas {
     c.ultimaMensagem = (ultima.direcao === "saida" ? "Você: " : "") + previa(ultima).slice(0, 120);
     if (msg.direcao === "entrada" && msg.nome && !c.nome) c.nome = msg.nome;
     if (msg.telefone && !c.telefone) c.telefone = digitos(msg.telefone);
-    if (nova && msg.direcao === "entrada") c.naoLidas = (c.naoLidas || 0) + 1;
+    if (nova && msg.direcao === "entrada") {
+      c.naoLidas = (c.naoLidas || 0) + 1;
+      // Fila de atendimento: entra na ordem de chegada e só sai quando alguém dá baixa.
+      if (!c.fila) c.fila = { desde: msg.em };
+    }
     if (msg.direcao === "saida") c.naoLidas = 0; // respondeu pelo celular ou pelo CRM
     this.agendarSalvar();
     return true;
+  }
+
+  /** Fixa (ou solta) a conversa no topo da lista. */
+  fixar(jid, fixada) {
+    const c = this.mapa.get(jid);
+    if (!c) return undefined;
+    c.fixada = !!fixada;
+    this.agendarSalvar();
+    return c;
+  }
+
+  /** Tira a conversa da fila de atendimento ("dar baixa"); ela volta para a lista normal. */
+  darBaixa(jid) {
+    const c = this.mapa.get(jid);
+    if (!c) return undefined;
+    c.fila = null;
+    c.baixaEm = new Date().toISOString();
+    this.agendarSalvar();
+    return c;
+  }
+
+  /** Põe a conversa na fila de atendimento à mão (ex.: voltou a precisar de atenção). */
+  colocarNaFila(jid) {
+    const c = this.mapa.get(jid);
+    if (!c) return undefined;
+    if (!c.fila) c.fila = { desde: new Date().toISOString() };
+    this.agendarSalvar();
+    return c;
   }
 
   /** Acha uma mensagem pelo id (para servir a mídia dela). */
@@ -153,7 +185,8 @@ export class Conversas {
   listar() {
     return [...this.mapa.values()]
       .filter((c) => c.ultimaEm || c.mensagens.length)
-      .sort((a, b) => (b.ultimaEm || "").localeCompare(a.ultimaEm || ""))
+      // Fixadas primeiro; depois as mais recentes.
+      .sort((a, b) => Number(!!b.fixada) - Number(!!a.fixada) || (b.ultimaEm || "").localeCompare(a.ultimaEm || ""))
       .map(({ mensagens: _m, ...resto }) => resto);
   }
 }

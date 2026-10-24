@@ -26,6 +26,18 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
   - Mensagens recebidas entram no histórico do lead do mesmo telefone; número novo vira lead em
     *Novo Lead* automaticamente (pode desligar na aba WhatsApp).
   - A sessão fica salva em `data/whatsapp-auth/` e reconecta sozinha quando o servidor reinicia.
+- **Pedidos** (aba *Pedidos*)
+  - **Produtos:** nome, código/SKU, unidade, preço, descrição; ativar/desativar.
+  - **Condições de pagamento:** nome, número de parcelas e desconto (−) ou acréscimo (+) em %
+    (ex.: PIX à vista −5%, Cartão 3x sem juros, Boleto 30/60/90 +3%).
+  - **Pedido:** cliente (lead ou cliente sem cadastro), itens do catálogo ou avulsos, quantidade e
+    preço, condição de pagamento, desconto, frete, observações. Totais e parcelas calculados na hora.
+    Moeda acompanha o país do lead (Portugal = €).
+  - **Status:** Orçamento → Confirmado → Em separação → Enviado → Entregue (ou Cancelado), mudado
+    direto na lista; cada mudança fica no histórico do pedido.
+  - Totais por status no topo, busca, e **enviar o resumo do pedido pelo WhatsApp** ao cliente.
+  - Pedido guarda uma cópia do produto e da condição: mudar o cadastro depois não altera pedidos feitos.
+  - Também dá para criar pedido a partir do lead (modal do lead) e da conversa (botão *+ Pedido*).
 - **Conversas (caixa de entrada do WhatsApp)**
   - A aba *Conversas* mostra as conversas do seu WhatsApp (as recentes chegam quando você conecta;
     as novas entram na hora), com busca e filtros *Todas / Não lidas / Sem lead / Leads*.
@@ -45,6 +57,11 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
   - Por segurança, só foto, vídeo, áudio e PDF abrem no navegador; qualquer outro arquivo é baixado.
   - Mídia antiga pode ter expirado no WhatsApp: com o celular conectado ele reenvia; se não der,
     aparece "Não foi possível abrir este arquivo — tentar de novo".
+  - **Fila de atendimento** (filtro *Fila*): quem manda mensagem entra na fila **por ordem de
+    chegada** (1º, 2º, 3º…, com "chegou há X min"). Ao terminar o atendimento, clique em
+    **✓ Dar baixa**: a conversa sai da fila e segue normal em *Todas*. Se a pessoa mandar mensagem
+    de novo, ela volta para o fim da fila. Dá para *Pôr na fila* à mão.
+  - **Fixar contatos:** o 📌 no topo da conversa fixa o contato no alto da lista.
   - Grupos, status e canais não entram. Mensagens que você manda pelo celular também aparecem.
   - A criação automática de lead para todo número novo vem **desligada** (ligue em *WhatsApp* se quiser).
 - **Respostas rápidas** — modelos de mensagem com atalho. No chat do lead, digite `/` (ex.: `/ola`)
@@ -138,12 +155,18 @@ Coloque um proxy com HTTPS (Caddy, Nginx, Traefik) na frente se for expor na int
 | `WA_LOG_LEVEL` | `silent` | Log da biblioteca do WhatsApp (`info`, `debug`) |
 | `WA_SIMULADO` | *(vazia)* | `1` = modo demonstração: WhatsApp de mentira com conversas de exemplo, dados em `data-demonstracao/` |
 
+## Versão
+
+A versão e a data dela aparecem no canto superior direito (ex.: `v1.4.0 · 24/10/2026`). Elas vêm
+dos campos `version` e `dataVersao` do `package.json`.
+
 ## Como funciona
 
 - `server.mjs` — Express: API REST (`/api/leads`, `/api/whatsapp`, `/api/config`), eventos em tempo
   real (`/api/eventos`, Server-Sent Events) e o frontend estático.
 - `store.mjs` — leads e configurações em `data/leads.json` (escrita atômica) + validação dos campos.
 - `followups.mjs` — agenda de follow-ups (regras por etapa + manuais) e o laço que envia os vencidos a cada 30 s.
+- `pedidos.mjs` — produtos, condições de pagamento e pedidos em `data/pedidos.json`.
 - `conversas.mjs` — caixa de entrada: conversas e últimas mensagens em `data/conversas.json`.
 - `whatsapp-simulado.mjs` — modo demonstração (`WA_SIMULADO=1`), sem celular.
 - `whatsapp.mjs` — conexão WhatsApp Web multi-dispositivo via [Baileys](https://github.com/WhiskeySockets/Baileys),

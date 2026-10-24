@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -11,10 +11,14 @@ import express from "express";
 import { Conversas } from "./conversas.mjs";
 import { ErroValidacao, Store, chaveTelefone } from "./store.mjs";
 import { Followups } from "./followups.mjs";
+import { Pedidos, STATUS_PEDIDO } from "./pedidos.mjs";
 import { WhatsApp } from "./whatsapp.mjs";
 import { WhatsAppSimulado } from "./whatsapp-simulado.mjs";
 
 const raiz = path.dirname(fileURLToPath(import.meta.url));
+// Versão e data da versão vêm do package.json (mudam a cada atualização, sem editar código).
+const PACOTE = JSON.parse(await readFile(path.join(raiz, "package.json"), "utf8"));
+const VERSAO = { versao: PACOTE.version, data: PACOTE.dataVersao || "" };
 const PORTA = Number(process.env.PORT || 3000);
 // O modo demonstração guarda tudo à parte, para nunca misturar com os dados reais.
 const DADOS = process.env.DATA_DIR || path.join(raiz, process.env.WA_SIMULADO === "1" ? "data-demonstracao" : "data");
@@ -22,6 +26,8 @@ const SENHA = process.env.APP_PASSWORD || "";
 
 const store = new Store(DADOS);
 await store.carregar();
+const pedidos = new Pedidos(DADOS);
+await pedidos.carregar();
 const conversas = new Conversas(DADOS);
 await conversas.carregar();
 // WA_SIMULADO=1: modo demonstração, sem celular (ver whatsapp-simulado.mjs).
@@ -105,6 +111,8 @@ if (SENHA) {
 
 const assincrono = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
+app.get("/api/versao", (_req, res) => res.json({ data: VERSAO }));
+
 app.get("/api/leads", (_req, res) => res.json({ data: store.listar() }));
 
 app.post("/api/leads", assincrono(async (req, res) => {
@@ -125,6 +133,7 @@ app.patch("/api/leads/:id", assincrono(async (req, res) => {
 
 app.delete("/api/leads/:id", assincrono(async (req, res) => {
   if (!(await store.excluir(req.params.id))) return res.status(404).json({ error: { message: "Lead não encontrado" } });
+  pedidos.desligarLead(req.params.id); // os pedidos ficam, com o nome do cliente
   transmitir("leads", { motivo: "excluido", id: req.params.id });
   res.status(204).end();
 }));
@@ -217,6 +226,91 @@ app.post("/api/leads/:id/whatsapp", assincrono(async (req, res) => {
   const atualizado = await store.registrarMensagem(lead.id, msg);
   transmitir("leads", { motivo: "mensagem", id: lead.id });
   res.json({ data: atualizado });
+}));
+
+// ---- pedidos, produtos e condições de pagamento ----
+const naoEncontrado = (res, o) => res.status(404).json({ error: { message: `${o} não encontrado` } });
+const avisarPedidos = () => transmitir("pedidos", {});
+
+app.get("/api/pedidos", (_req, res) => {
+  res.json({ data: { pedidos: pedidos.listar(), produtos: pedidos.dados.produtos, condicoes: pedidos.dados.condicoes, status: STATUS_PEDIDO } });
+});
+
+for (const [rota, criar, atualizar, excluir, nome] of [
+  ["produtos", "criarProduto", "atualizarProduto", "excluirProduto", "Produto"],
+  ["condicoes", "criarCondicao", "atualizarCondicao", "excluirCondicao", "Condição de pagamento"],
+]) {
+  app.post(`/api/${rota}`, assincrono(async (req, res) => {
+    const item = await pedidos[criar](req.body);
+    avisarPedidos();
+    res.status(201).json({ data: item });
+  }));
+  app.patch(`/api/${rota}/:id`, assincrono(async (req, res) => {
+    const item = await pedidos[atualizar](req.params.id, req.body);
+    if (!item) return naoEncontrado(res, nome);
+    avisarPedidos();
+    res.json({ data: item });
+  }));
+  app.delete(`/api/${rota}/:id`, assincrono(async (req, res) => {
+    if (!(await pedidos[excluir](req.params.id))) return naoEncontrado(res, nome);
+    avisarPedidos();
+    res.status(204).end();
+  }));
+}
+
+/** Cliente do pedido: o lead escolhido; sem lead, vale o nome digitado (clienteNome). */
+function leadDoPedido(body, atual) {
+  const leadId = body && "leadId" in body ? body.leadId : atual?.leadId;
+  if (!leadId) return null;
+  const lead = store.obter(String(leadId));
+  if (!lead) throw new ErroValidacao("Cliente (lead) não encontrado");
+  return lead;
+}
+
+app.post("/api/pedidos", assincrono(async (req, res) => {
+  const pedido = await pedidos.criar(req.body, leadDoPedido(req.body));
+  avisarPedidos();
+  res.status(201).json({ data: pedido });
+}));
+app.patch("/api/pedidos/:id", assincrono(async (req, res) => {
+  const atual = pedidos.obter(req.params.id);
+  if (!atual) return naoEncontrado(res, "Pedido");
+  const pedido = await pedidos.atualizar(req.params.id, req.body, leadDoPedido(req.body, atual));
+  avisarPedidos();
+  res.json({ data: pedido });
+}));
+app.post("/api/pedidos/:id/status", assincrono(async (req, res) => {
+  const pedido = await pedidos.mudarStatus(req.params.id, req.body?.status);
+  if (!pedido) return naoEncontrado(res, "Pedido");
+  avisarPedidos();
+  res.json({ data: pedido });
+}));
+app.delete("/api/pedidos/:id", assincrono(async (req, res) => {
+  if (!(await pedidos.excluir(req.params.id))) return naoEncontrado(res, "Pedido");
+  avisarPedidos();
+  res.status(204).end();
+}));
+
+// Manda o resumo do pedido para o cliente pelo WhatsApp (e registra na conversa e no lead).
+app.post("/api/pedidos/:id/whatsapp", assincrono(async (req, res) => {
+  const pedido = pedidos.obter(req.params.id);
+  if (!pedido) return naoEncontrado(res, "Pedido");
+  const lead = pedido.leadId && store.obter(pedido.leadId);
+  if (!lead) throw new ErroValidacao("Este pedido não está ligado a um lead com WhatsApp");
+  if (!lead.telefone && !lead.whatsappJid) throw new ErroValidacao("O lead não tem telefone");
+  const texto = pedidos.resumoParaWhatsApp(pedido);
+  let enviada;
+  try {
+    enviada = await whatsapp.enviarParaLead(lead, texto);
+  } catch (e) {
+    return res.status(409).json({ error: { message: e.message } });
+  }
+  const msg = { id: enviada.id, direcao: "saida", texto, em: enviada.em, origem: "pedido" };
+  conversas.registrar(enviada.jid, msg);
+  await store.registrarMensagem(lead.id, msg);
+  avisarConversas();
+  transmitir("leads", { motivo: "mensagem", id: lead.id });
+  res.json({ data: { texto } });
 }));
 
 // ---- caixa de entrada do WhatsApp ----
@@ -393,6 +487,26 @@ app.post("/api/conversas/:jid/anexos", express.raw({ type: "application/octet-st
   res.json({ data: paraTela(c, lead) });
 }));
 
+// Fixar no topo e fila de atendimento.
+app.post("/api/conversas/:jid/fixar", (req, res) => {
+  const c = conversas.fixar(req.params.jid, req.body?.fixada !== false);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  avisarConversas();
+  res.json({ data: { jid: c.jid, fixada: c.fixada } });
+});
+app.post("/api/conversas/:jid/baixa", (req, res) => {
+  const c = conversas.darBaixa(req.params.jid);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  avisarConversas();
+  res.json({ data: { jid: c.jid, fila: c.fila } });
+});
+app.post("/api/conversas/:jid/fila", (req, res) => {
+  const c = conversas.colocarNaFila(req.params.jid);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  avisarConversas();
+  res.json({ data: { jid: c.jid, fila: c.fila } });
+});
+
 // Liga a conversa a um lead que já existe (útil quando o WhatsApp esconde o número).
 app.post("/api/conversas/:jid/vincular", assincrono(async (req, res) => {
   const c = conversas.obter(req.params.jid);
@@ -432,7 +546,7 @@ app.use((erro, _req, res, _next) => {
 });
 
 app.listen(PORTA, () => {
-  console.info(`Controle de Leads 2026 rodando em http://localhost:${PORTA}`);
+  console.info(`Controle de Leads 2026 v${VERSAO.versao} rodando em http://localhost:${PORTA}`);
   // Endereços para abrir de outros aparelhos da mesma rede (celular, outro computador).
   const ipsDaRede = Object.values(networkInterfaces())
     .flat()

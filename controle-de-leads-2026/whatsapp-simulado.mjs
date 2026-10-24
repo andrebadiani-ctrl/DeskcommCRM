@@ -128,7 +128,10 @@ export class WhatsAppSimulado extends EventEmitter {
         const tamanho = AMOSTRAS[amostra]().length;
         this.#mensagem(jid, { texto, midia: { ...descricao, tamanho, wa: { simulado: amostra } }, nome: CONVERSAS.find((c) => c.jid === jid)?.nome || "", em: minutosAtras(min), historico: true });
       }
-      // A conversa mais recente chega "agora", como não lida.
+      // Mensagens que chegam "agora" (não lidas): entram na fila de atendimento por ordem de chegada.
+      const nome = (jid) => CONVERSAS.find((c) => c.jid === jid)?.nome || "";
+      this.#mensagem("5521987650000@s.whatsapp.net", { texto: "Alguém pode confirmar quinta às 14h?", nome: nome("5521987650000@s.whatsapp.net"), em: minutosAtras(18), nova: true });
+      this.#mensagem("351913334444@s.whatsapp.net", { texto: "Bom dia! Ainda aguardo a apresentação 🙂", nome: nome("351913334444@s.whatsapp.net"), em: minutosAtras(9), nova: true });
       this.#mensagem(CONVERSAS[0].jid, { texto: "Oi? 😊", nome: CONVERSAS[0].nome, nova: true });
     }, 300);
   }

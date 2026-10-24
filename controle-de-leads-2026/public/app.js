@@ -33,7 +33,7 @@
     conversas: [],
     conversaAberta: null,
     conversaDados: null,
-    cvFiltro: "todas",
+    cvFiltro: lerPreferencia("cvFiltro", "todas"),
     cvBusca: "",
     novoLeadJid: null,
     renderPendente: false,
@@ -224,6 +224,7 @@
     if (estado.aba === "kanban") renderKanban();
     if (estado.aba === "whatsapp") renderWhatsApp();
     if (estado.aba === "conversas") renderConversas();
+    if (estado.aba === "pedidos") renderPedidos();
     renderPilula();
   }
 
@@ -233,10 +234,12 @@
     $("#painel-kanban").hidden = estado.aba !== "kanban";
     $("#painel-whatsapp").hidden = estado.aba !== "whatsapp";
     $("#painel-conversas").hidden = estado.aba !== "conversas";
-    const semFiltros = estado.aba === "whatsapp" || estado.aba === "conversas";
+    $("#painel-pedidos").hidden = estado.aba !== "pedidos";
+    const semFiltros = ["whatsapp", "conversas", "pedidos"].includes(estado.aba);
+    $("#kpis").hidden = estado.aba === "conversas" || estado.aba === "pedidos"; // Pedidos tem os próprios totais
     $("#filtros").hidden = semFiltros;
     $("#btn-filtros").hidden = semFiltros;
-    $("#kpis").hidden = estado.aba === "conversas"; // a caixa de entrada usa a altura toda
+
   }
 
   function renderKpis() {
@@ -351,7 +354,10 @@
   function renderPilula() {
     const s = estado.whatsapp.status;
     const p = $("#wa-pilula");
-    p.textContent = PILULA_WA[s] + (estado.whatsapp.simulado ? " (demonstração)" : "");
+    const completo = PILULA_WA[s] + (estado.whatsapp.simulado ? " (demonstração)" : "");
+    // No celular só cabe "WhatsApp"; a cor da bolinha continua mostrando o status.
+    p.innerHTML = `<span class="pilula-longa">${esc(completo)}</span><span class="pilula-curta">WhatsApp</span>`;
+    p.title = completo;
     p.className = "wa-pilula" + (s === "conectado" ? " on" : s === "desconectado" ? "" : " espera");
   }
 
@@ -659,6 +665,7 @@
     $("#bloco-nota").hidden = !lead;
     $("#bloco-wa").hidden = !lead;
     $("#bloco-followups").hidden = !lead;
+    $("#bloco-pedidos").hidden = !lead;
     $("#btn-salvar").textContent = lead ? "Salvar alterações" : "Criar lead";
 
     const v = lead || { pais: "", criadoEm: new Date().toISOString(), ...(preencher || {}) };
@@ -671,6 +678,7 @@
       renderMensagens(lead);
       compositorLead.renderAtalhos();
       atualizarLinkConversa(lead);
+      renderPedidosLead(lead);
       renderFollowupsLead(lead);
       prepararAgendamento();
     }
@@ -1269,9 +1277,22 @@
     bolha.textContent = total > 99 ? "99+" : String(total);
   }
 
+  // Fila de atendimento: quem chegou primeiro aparece primeiro.
+  const naFila = () => estado.conversas.filter((c) => c.fila).sort((a, b) => a.fila.desde.localeCompare(b.fila.desde));
+  function tempoDesde(iso) {
+    const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (min < 1) return "agora";
+    if (min < 60) return `há ${min} min`;
+    if (min < 1440) return `há ${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""}`;
+    const d = Math.floor(min / 1440);
+    return `há ${d} dia${d > 1 ? "s" : ""}`;
+  }
+  const ICONE_PIN = `<svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3 3H7l3-3z" /><path d="M12 13v7" /></svg>`;
+
   function conversasFiltradas() {
     const termo = normalizar(estado.cvBusca.trim());
-    return estado.conversas.filter((c) => {
+    const base = estado.cvFiltro === "fila" ? naFila() : estado.conversas;
+    return base.filter((c) => {
       if (estado.cvFiltro === "nao-lidas" && !c.naoLidas) return false;
       if (estado.cvFiltro === "sem-lead" && c.lead) return false;
       if (estado.cvFiltro === "leads" && !c.lead) return false;
@@ -1293,21 +1314,28 @@
     } else if (!lista.length) {
       vazio = `<div class="cv-lista-vazia"><span>Nenhuma conversa encontrada.</span></div>`;
     }
-    $("#cv-lista").innerHTML = vazio || lista.map((c) => {
+    const fila = estado.cvFiltro === "fila";
+    if (fila && !lista.length && estado.conversas.length) vazio = `<div class="cv-lista-vazia"><strong>Fila vazia 🎉</strong><span>Todo mundo foi atendido. Quem mandar mensagem nova entra aqui, por ordem de chegada.</span></div>`;
+    $("#cv-lista").innerHTML = vazio || lista.map((c, i) => {
       const nome = nomeConversa(c);
-      return `<button type="button" class="cv-item${c.jid === estado.conversaAberta ? " ativa" : ""}${c.naoLidas ? " nao-lida" : ""}" data-jid="${esc(c.jid)}">
+      return `<div role="button" tabindex="0" class="cv-item${c.jid === estado.conversaAberta ? " ativa" : ""}${c.naoLidas ? " nao-lida" : ""}${fila ? " na-fila" : ""}" data-jid="${esc(c.jid)}">
+        ${fila ? `<span class="posicao" title="Posição na fila">${i + 1}º</span>` : ""}
         <span class="avatar${c.lead ? " " + (CLASSE_ETAPA[c.lead.etapa] || "") : ""}">${esc(iniciais(nome))}</span>
         <span class="cv-meio">
-          <strong>${esc(nome)}</strong>
+          <strong>${c.fixada ? `<span class="pin" title="Fixada">${ICONE_PIN}</span>` : ""}${esc(nome)}</strong>
           <span class="previa">${esc(c.ultimaMensagem || "")}</span>
+          ${fila ? `<span class="espera">⏱ chegou ${tempoDesde(c.fila.desde)}</span>` : ""}
         </span>
         <span class="cv-lado">
           <time>${esc(horaCurta(c.ultimaEm))}</time>
           ${c.naoLidas ? `<span class="bolha">${c.naoLidas}</span>` : ""}
-          ${c.lead ? `<span class="cv-etapa ${CLASSE_ETAPA[c.lead.etapa] || ""}"><span class="ponto"></span>${esc(c.lead.etapa)}</span>` : `<span class="cv-sem-lead">sem lead</span>`}
+          ${fila ? `<button type="button" class="btn btn-secundario mini" data-baixa="${esc(c.jid)}" title="Atendimento concluído: tira da fila">✓ Dar baixa</button>`
+            : c.lead ? `<span class="cv-etapa ${CLASSE_ETAPA[c.lead.etapa] || ""}"><span class="ponto"></span>${esc(c.lead.etapa)}</span>` : `<span class="cv-sem-lead">sem lead</span>`}
         </span>
-      </button>`;
+      </div>`;
     }).join("");
+    const nFila = estado.conversas.filter((c) => c.fila).length;
+    $("#cv-fila-contagem").textContent = nFila ? String(nFila) : "";
     if (!estado.conversaAberta) $("#inbox").classList.remove("com-chat");
   }
 
@@ -1321,6 +1349,7 @@
           <span class="cv-lead-rotulo">Lead</span>
           <select class="etapa" id="cv-mover" aria-label="Etapa do funil">${opcoesEtapa(lead.etapa)}</select>
           <button type="button" class="btn btn-secundario mini" data-cv-abrir-lead="${lead.id}">Abrir lead</button>
+          <button type="button" class="btn btn-secundario mini" data-novo-pedido="${lead.id}">+ Pedido</button>
         </div>`
       : `<div class="cv-acoes">
           <button type="button" class="btn btn-primario" id="cv-adicionar">+ Adicionar como lead</button>
@@ -1329,10 +1358,15 @@
             ${[...estado.leads].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((l) => `<option value="${l.id}">${esc(l.nome)}${l.empresa ? " — " + esc(l.empresa) : ""}</option>`).join("")}
           </select>
         </div>`;
+    const atendimento = c.fila
+      ? `<div class="cv-fila"><span>⏱ Na fila: chegou ${tempoDesde(c.fila.desde)}</span><button type="button" class="btn btn-primario mini" id="cv-baixa">✓ Dar baixa</button></div>`
+      : `<button type="button" class="btn btn-fantasma mini" id="cv-por-na-fila" title="Volta para a fila de atendimento">Pôr na fila</button>`;
     $("#cv-cabecalho").innerHTML = `
       <button type="button" class="icone-btn cv-voltar" id="cv-voltar" aria-label="Voltar para a lista">${ICONE_VOLTAR}</button>
       <span class="avatar${lead ? " " + (CLASSE_ETAPA[lead.etapa] || "") : ""}">${esc(iniciais(nome))}</span>
       <div class="cv-quem"><strong>${esc(nome)}</strong><span>${esc(numero)}${lead && lead.nome !== nome ? ` · lead: ${esc(lead.nome)}` : ""}</span></div>
+      <button type="button" class="icone-btn cv-fixar${c.fixada ? " ativo" : ""}" id="cv-fixar" aria-pressed="${!!c.fixada}" title="${c.fixada ? "Desafixar" : "Fixar no topo da lista"}">${ICONE_PIN}</button>
+      ${atendimento}
       ${acoes}`;
   }
 
@@ -1500,11 +1534,20 @@
   $("#cv-enviar").addEventListener("click", enviarNaConversa);
 
   $("#cv-lista").addEventListener("click", (e) => {
+    const baixa = e.target.closest("[data-baixa]");
+    if (baixa) return darBaixa(baixa.dataset.baixa); // não abre a conversa
     const item = e.target.closest("[data-jid]");
     if (item) abrirConversa(item.dataset.jid);
   });
+  $("#cv-lista").addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches(".cv-item")) {
+      e.preventDefault();
+      abrirConversa(e.target.dataset.jid);
+    }
+  });
   $$("[data-cv-filtro]").forEach((b) => b.addEventListener("click", () => {
     estado.cvFiltro = b.dataset.cvFiltro;
+    gravarPreferencia("cvFiltro", estado.cvFiltro);
     renderListaConversas();
   }));
   $("#cv-busca").addEventListener("input", (e) => {
@@ -1513,8 +1556,25 @@
   });
 
   // Ações do cabeçalho da conversa: adicionar, vincular, mudar etapa, abrir lead, voltar.
+  async function acaoConversa(jid, acao, corpo) {
+    try {
+      await api("POST", `/api/conversas/${jidUrl(jid)}/${acao}`, corpo);
+      await carregarConversas();
+      if (estado.conversaAberta === jid) await abrirConversa(jid, { rolar: false });
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+  const darBaixa = (jid) => acaoConversa(jid, "baixa").then(() => toast("Atendimento concluído — saiu da fila"));
+
   $("#cv-cabecalho").addEventListener("click", (e) => {
+    const c = estado.conversaDados;
     if (e.target.closest("#cv-voltar")) return fecharConversa();
+    if (e.target.closest("#cv-baixa")) return darBaixa(c.jid);
+    if (e.target.closest("#cv-por-na-fila")) return acaoConversa(c.jid, "fila").then(() => toast("Conversa colocada na fila"));
+    if (e.target.closest("#cv-fixar")) return acaoConversa(c.jid, "fixar", { fixada: !c.fixada }).then(() => toast(c.fixada ? "Conversa desafixada" : "Conversa fixada no topo"));
+    const pedido = e.target.closest("[data-novo-pedido]");
+    if (pedido) return abrirPedido(null, { leadId: pedido.dataset.novoPedido });
     if (e.target.closest("#cv-adicionar")) return adicionarLeadDaConversa();
     const abrir = e.target.closest("[data-cv-abrir-lead]");
     if (abrir) abrirModal(abrir.dataset.cvAbrirLead);
@@ -1579,6 +1639,430 @@
     e.preventDefault();
     trocarAba(ir.dataset.irAba);
   });
+
+  // ---------- Pedidos, produtos e condições de pagamento ----------
+  const pd = { pedidos: [], produtos: [], condicoes: [], status: [], aba: "pedidos", filtroStatus: "", busca: "" };
+  const CLASSE_STATUS = {
+    "Orçamento": "st-orcamento", Confirmado: "st-confirmado", "Em separação": "st-separacao",
+    Enviado: "st-enviado", Entregue: "st-entregue", Cancelado: "st-cancelado",
+  };
+  const dinheiro = (v, moeda = "BRL") =>
+    new Intl.NumberFormat(moeda === "EUR" ? "pt-PT" : "pt-BR", { style: "currency", currency: moeda }).format(Number(v) || 0);
+  const centavos = (n) => Math.round(n * 100) / 100;
+  const ICONE_EDITAR = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z" /></svg>`;
+  const ICONE_LIXO = `<svg viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>`;
+  const ICONE_WA = `<svg viewBox="0 0 24 24"><path d="M4 20l1.3-3.9A8 8 0 1 1 8 19z" /></svg>`;
+
+  async function carregarPedidos() {
+    Object.assign(pd, await api("GET", "/api/pedidos"));
+    if (estado.aba === "pedidos") renderPedidos();
+    if (estado.leadAberto) renderPedidosLead(estado.leads.find((l) => l.id === estado.leadAberto));
+  }
+
+  function renderPedidos() {
+    $$("[data-pd-aba]").forEach((b) => b.classList.toggle("ativo", b.dataset.pdAba === pd.aba));
+    $("#pd-lista-pedidos").hidden = pd.aba !== "pedidos";
+    $("#pd-lista-produtos").hidden = pd.aba !== "produtos";
+    $("#pd-lista-condicoes").hidden = pd.aba !== "condicoes";
+    $("#pd-novo").textContent = { pedidos: "+ Novo pedido", produtos: "+ Novo produto", condicoes: "+ Nova condição" }[pd.aba];
+    $("#pd-busca").placeholder = { pedidos: "Buscar pedido, cliente ou produto", produtos: "Buscar produto ou código", condicoes: "Buscar condição" }[pd.aba];
+    if (pd.aba === "pedidos") renderListaPedidos();
+    if (pd.aba === "produtos") renderListaProdutos();
+    if (pd.aba === "condicoes") renderListaCondicoes();
+  }
+
+  function pedidosFiltrados() {
+    const termo = normalizar(pd.busca.trim());
+    return pd.pedidos.filter((p) => {
+      if (pd.filtroStatus && p.status !== pd.filtroStatus) return false;
+      if (!termo) return true;
+      return normalizar([`#${p.numero}`, p.numero, p.cliente, p.condicao?.nome, ...p.itens.map((i) => i.descricao)].join(" ")).includes(termo);
+    });
+  }
+
+  function renderListaPedidos() {
+    // Totais por status (sem contar os cancelados no "em aberto").
+    const porStatus = (st) => pd.pedidos.filter((p) => p.status === st);
+    const chip = (valor, rotulo, lista) => {
+      const soma = lista.reduce((s, p) => s + (p.moeda === "EUR" ? 0 : p.total), 0);
+      return `<button type="button" class="pd-chip ${CLASSE_STATUS[valor] || ""}${pd.filtroStatus === valor ? " ativo" : ""}" data-pd-status="${esc(valor)}">
+        <span>${esc(rotulo)}</span><strong>${lista.length}</strong>${soma ? `<small>${dinheiro(soma)}</small>` : ""}</button>`;
+    };
+    $("#pd-status").innerHTML = chip("", "Todos", pd.pedidos) + pd.status.map((st) => chip(st, st, porStatus(st))).join("");
+    const lista = pedidosFiltrados();
+    $("#pd-corpo").innerHTML = lista.map((p) => {
+      const resumoItens = p.itens.map((i) => `${String(i.quantidade).replace(".", ",")} × ${i.descricao}`).join("\n");
+      const pagamento = p.condicao ? `${esc(p.condicao.nome)}${p.parcelas > 1 ? `<small>${p.parcelas}x de ${dinheiro(p.valorParcela, p.moeda)}</small>` : ""}` : `<span class="suave">—</span>`;
+      return `<tr data-pedido="${p.id}">
+        <td><strong>#${p.numero}</strong></td>
+        <td>${dataCurta(p.criadoEm)}</td>
+        <td>${p.leadId ? `<a href="#" data-abrir-lead="${p.leadId}">${esc(p.cliente)}</a>` : esc(p.cliente)}</td>
+        <td title="${esc(resumoItens)}">${p.itens.length} ${p.itens.length === 1 ? "item" : "itens"}<small>${esc(p.itens[0]?.descricao || "")}${p.itens.length > 1 ? "…" : ""}</small></td>
+        <td>${pagamento}</td>
+        <td class="num"><strong>${dinheiro(p.total, p.moeda)}</strong></td>
+        <td class="${CLASSE_STATUS[p.status] || ""}"><select class="pd-status-sel" data-mudar-status="${p.id}" aria-label="Status do pedido">${pd.status.map((st) => `<option${st === p.status ? " selected" : ""}>${esc(st)}</option>`).join("")}</select></td>
+        <td class="col-acoes">
+          <button class="icone-btn" data-abrir-pedido="${p.id}" title="Abrir / editar">${ICONE_EDITAR}</button>
+          ${p.leadId ? `<button class="icone-btn wa" data-pedido-wa="${p.id}" title="Enviar resumo no WhatsApp">${ICONE_WA}</button>` : ""}
+          <button class="icone-btn del" data-excluir-pedido="${p.id}" title="Excluir">${ICONE_LIXO}</button>
+        </td>
+      </tr>`;
+    }).join("");
+    $("#pd-vazio").hidden = lista.length > 0;
+  }
+
+  function renderListaProdutos() {
+    const termo = normalizar(pd.busca.trim());
+    const lista = pd.produtos.filter((p) => !termo || normalizar(`${p.nome} ${p.codigo} ${p.descricao}`).includes(termo));
+    $("#pr-corpo").innerHTML = lista.map((p) => `<tr class="${p.ativo ? "" : "inativo"}">
+      <td>${esc(p.codigo || "—")}</td>
+      <td><strong>${esc(p.nome)}</strong>${p.descricao ? `<small>${esc(p.descricao)}</small>` : ""}</td>
+      <td>${esc(p.unidade)}</td>
+      <td class="num"><strong>${dinheiro(p.preco)}</strong></td>
+      <td><label class="interruptor mini"><input type="checkbox" data-ativar-produto="${p.id}" ${p.ativo ? "checked" : ""} /><span class="trilho"></span></label></td>
+      <td class="col-acoes">
+        <button class="icone-btn" data-editar-produto="${p.id}" title="Editar">${ICONE_EDITAR}</button>
+        <button class="icone-btn del" data-excluir-produto="${p.id}" title="Excluir">${ICONE_LIXO}</button>
+      </td></tr>`).join("");
+    $("#pr-vazio").hidden = lista.length > 0;
+  }
+
+  const descreverAjuste = (a) => (!a ? "—" : a < 0 ? `${String(-a).replace(".", ",")}% de desconto` : `${String(a).replace(".", ",")}% de acréscimo`);
+
+  function renderListaCondicoes() {
+    const termo = normalizar(pd.busca.trim());
+    const lista = pd.condicoes.filter((c) => !termo || normalizar(`${c.nome} ${c.descricao}`).includes(termo));
+    $("#cp-corpo").innerHTML = lista.map((c) => `<tr class="${c.ativo ? "" : "inativo"}">
+      <td><strong>${esc(c.nome)}</strong></td>
+      <td>${c.parcelas}x</td>
+      <td class="${c.ajustePercentual < 0 ? "ajuste-desc" : c.ajustePercentual > 0 ? "ajuste-acr" : ""}">${descreverAjuste(c.ajustePercentual)}</td>
+      <td>${esc(c.descricao || "")}</td>
+      <td><label class="interruptor mini"><input type="checkbox" data-ativar-condicao="${c.id}" ${c.ativo ? "checked" : ""} /><span class="trilho"></span></label></td>
+      <td class="col-acoes">
+        <button class="icone-btn" data-editar-condicao="${c.id}" title="Editar">${ICONE_EDITAR}</button>
+        <button class="icone-btn del" data-excluir-condicao="${c.id}" title="Excluir">${ICONE_LIXO}</button>
+      </td></tr>`).join("");
+    $("#cp-vazio").hidden = lista.length > 0;
+  }
+
+  $$("[data-pd-aba]").forEach((b) => b.addEventListener("click", () => {
+    pd.aba = b.dataset.pdAba;
+    pd.busca = "";
+    $("#pd-busca").value = "";
+    renderPedidos();
+  }));
+  $("#pd-busca").addEventListener("input", (e) => {
+    pd.busca = e.target.value;
+    renderPedidos();
+  });
+  $("#pd-novo").addEventListener("click", () => (pd.aba === "pedidos" ? abrirPedido() : pd.aba === "produtos" ? abrirProduto() : abrirCondicao()));
+  $("#pd-status").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-pd-status]");
+    if (!b) return;
+    pd.filtroStatus = pd.filtroStatus === b.dataset.pdStatus ? "" : b.dataset.pdStatus;
+    renderListaPedidos();
+  });
+
+  async function mudarStatusPedido(id, status) {
+    try {
+      await api("POST", `/api/pedidos/${id}/status`, { status });
+      toast(`Pedido agora está “${status}”`);
+      await carregarPedidos();
+    } catch (err) {
+      toast(err.message, true);
+      renderPedidos();
+    }
+  }
+  async function enviarPedidoWhatsApp(id) {
+    const p = pd.pedidos.find((x) => x.id === id);
+    if (!confirm(`Enviar o resumo do pedido #${p?.numero} para ${p?.cliente} pelo WhatsApp?`)) return;
+    try {
+      await api("POST", `/api/pedidos/${id}/whatsapp`);
+      toast("Resumo do pedido enviado pelo WhatsApp");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+  async function excluirRegistro(url, pergunta, ok) {
+    if (!confirm(pergunta)) return false;
+    try {
+      await api("DELETE", url);
+      toast(ok);
+      await carregarPedidos();
+      return true;
+    } catch (err) {
+      toast(err.message, true);
+      return false;
+    }
+  }
+
+  // Ações das três listas (delegadas para sobreviver ao redesenho).
+  $("#painel-pedidos").addEventListener("click", (e) => {
+    const t = (sel) => e.target.closest(sel);
+    let b;
+    if ((b = t("[data-abrir-pedido]"))) return abrirPedido(b.dataset.abrirPedido);
+    if ((b = t("[data-pedido-wa]"))) return enviarPedidoWhatsApp(b.dataset.pedidoWa);
+    if ((b = t("[data-excluir-pedido]"))) {
+      const p = pd.pedidos.find((x) => x.id === b.dataset.excluirPedido);
+      return excluirRegistro(`/api/pedidos/${p.id}`, `Excluir o pedido #${p.numero} de ${p.cliente}?`, "Pedido excluído");
+    }
+    if ((b = t("[data-editar-produto]"))) return abrirProduto(b.dataset.editarProduto);
+    if ((b = t("[data-excluir-produto]"))) {
+      const p = pd.produtos.find((x) => x.id === b.dataset.excluirProduto);
+      return excluirRegistro(`/api/produtos/${p.id}`, `Excluir o produto “${p.nome}”? Os pedidos já feitos não mudam.`, "Produto excluído");
+    }
+    if ((b = t("[data-editar-condicao]"))) return abrirCondicao(b.dataset.editarCondicao);
+    if ((b = t("[data-excluir-condicao]"))) {
+      const c = pd.condicoes.find((x) => x.id === b.dataset.excluirCondicao);
+      return excluirRegistro(`/api/condicoes/${c.id}`, `Excluir a condição “${c.nome}”? Os pedidos já feitos não mudam.`, "Condição excluída");
+    }
+  });
+  $("#painel-pedidos").addEventListener("change", async (e) => {
+    const d = e.target.dataset;
+    if (d.mudarStatus) return mudarStatusPedido(d.mudarStatus, e.target.value);
+    const [rota, id] = d.ativarProduto ? ["produtos", d.ativarProduto] : d.ativarCondicao ? ["condicoes", d.ativarCondicao] : [];
+    if (!rota) return;
+    try {
+      await api("PATCH", `/api/${rota}/${id}`, { ativo: e.target.checked });
+      await carregarPedidos();
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      toast(err.message, true);
+    }
+  });
+
+  // ---- formulário do pedido ----
+  const modalPedido = $("#modal-pedido");
+  const formPedido = $("#form-pedido");
+  let pedidoEditado = null;
+  let itensPedido = [];
+
+  const condicaoEscolhida = () => pd.condicoes.find((c) => c.id === formPedido.condicaoId.value) || (pedidoEditado?.condicao?.id === formPedido.condicaoId.value ? pedidoEditado.condicao : null);
+  const moedaDoPedido = () => {
+    const lead = estado.leads.find((l) => l.id === formPedido.leadId.value);
+    return lead ? (lead.pais === "Portugal" ? "EUR" : "BRL") : pedidoEditado?.moeda || "BRL";
+  };
+
+  function opcoesProduto(selecionado) {
+    const ativos = pd.produtos.filter((p) => p.ativo || p.id === selecionado);
+    return `<option value="">✎ Item avulso (digitar)</option>` + ativos.map((p) => `<option value="${p.id}"${p.id === selecionado ? " selected" : ""}>${esc(p.nome)}${p.codigo ? ` (${esc(p.codigo)})` : ""} — ${dinheiro(p.preco)}</option>`).join("");
+  }
+
+  function renderItensPedido() {
+    const moeda = moedaDoPedido();
+    $("#pedido-itens").innerHTML = itensPedido.map((i, n) => `<div class="item-pedido" data-n="${n}">
+        <div class="item-produto">
+          <select data-campo-item="produtoId" aria-label="Produto">${opcoesProduto(i.produtoId)}</select>
+          <input data-campo-item="descricao" value="${esc(i.descricao)}" placeholder="Descrição do item" maxlength="200" ${i.produtoId ? "hidden" : ""} />
+        </div>
+        <input data-campo-item="quantidade" type="number" min="0" step="any" inputmode="decimal" value="${i.quantidade}" aria-label="Quantidade" />
+        <input data-campo-item="precoUnitario" type="number" min="0" step="0.01" inputmode="decimal" value="${i.precoUnitario}" aria-label="Preço unitário" />
+        <span class="item-total">${dinheiro((Number(i.quantidade) || 0) * (Number(i.precoUnitario) || 0), moeda)}</span>
+        <button type="button" class="icone-btn del" data-remover-item="${n}" title="Remover item" ${itensPedido.length === 1 ? "disabled" : ""}>${ICONE_LIXO}</button>
+      </div>`).join("");
+    renderTotaisPedido();
+  }
+
+  // Prévia dos totais (o servidor recalcula ao salvar, com a mesma regra).
+  function renderTotaisPedido() {
+    const moeda = moedaDoPedido();
+    $$("#pedido-itens .item-pedido").forEach((linha, n) => {
+      const i = itensPedido[n];
+      linha.querySelector(".item-total").textContent = dinheiro((Number(i.quantidade) || 0) * (Number(i.precoUnitario) || 0), moeda);
+    });
+    const subtotal = centavos(itensPedido.reduce((s, i) => s + centavos((Number(i.quantidade) || 0) * (Number(i.precoUnitario) || 0)), 0));
+    const c = condicaoEscolhida();
+    const ajuste = centavos(subtotal * ((c?.ajustePercentual || 0) / 100));
+    const desconto = Number(formPedido.desconto.value) || 0;
+    const frete = Number(formPedido.frete.value) || 0;
+    const total = centavos(Math.max(0, subtotal + ajuste - desconto + frete));
+    const parcelas = c?.parcelas || 1;
+    const linha = (rotulo, valor, classe = "") => `<div class="${classe}"><span>${rotulo}</span><strong>${valor}</strong></div>`;
+    $("#pedido-totais").innerHTML =
+      linha("Subtotal", dinheiro(subtotal, moeda)) +
+      (ajuste ? linha(`${ajuste < 0 ? "Desconto" : "Acréscimo"} — ${esc(c.nome)}`, `${ajuste < 0 ? "−" : "+"} ${dinheiro(Math.abs(ajuste), moeda)}`, ajuste < 0 ? "ajuste-desc" : "ajuste-acr") : "") +
+      (desconto ? linha("Desconto", `− ${dinheiro(desconto, moeda)}`, "ajuste-desc") : "") +
+      (frete ? linha("Frete", `+ ${dinheiro(frete, moeda)}`) : "") +
+      linha("Total", `${dinheiro(total, moeda)}${parcelas > 1 ? `<small>${parcelas}x de ${dinheiro(centavos(total / parcelas), moeda)}</small>` : ""}`, "total-final");
+  }
+
+  function abrirPedido(id = null, { leadId = "" } = {}) {
+    const p = id ? pd.pedidos.find((x) => x.id === id) : null;
+    pedidoEditado = p;
+    formPedido.reset();
+    $("#pedido-titulo").textContent = p ? `Pedido #${p.numero}` : "Novo pedido";
+    $("#pedido-excluir").hidden = !p;
+    $("#pedido-whatsapp").hidden = !(p && p.leadId);
+    const leadEscolhido = p ? p.leadId : leadId;
+    const leads = [...estado.leads].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    formPedido.leadId.innerHTML = `<option value="">Selecione o cliente…</option>` +
+      leads.map((l) => `<option value="${l.id}"${l.id === leadEscolhido ? " selected" : ""}>${esc(l.nome)}${l.empresa ? " — " + esc(l.empresa) : ""}</option>`).join("") +
+      `<option value="__avulso"${p && !p.leadId ? " selected" : ""}>— Cliente sem cadastro —</option>`;
+    formPedido.clienteNome.value = p && !p.leadId ? p.cliente : "";
+    $("#campo-cliente-avulso").hidden = formPedido.leadId.value !== "__avulso";
+    const conds = pd.condicoes.filter((c) => c.ativo || c.id === p?.condicao?.id);
+    const condAntiga = p?.condicao && !pd.condicoes.some((c) => c.id === p.condicao.id) ? p.condicao : null;
+    formPedido.condicaoId.innerHTML = `<option value="">Sem condição definida</option>` +
+      [...conds, ...(condAntiga ? [condAntiga] : [])].map((c) => `<option value="${c.id}"${c.id === p?.condicao?.id ? " selected" : ""}>${esc(c.nome)}${c.parcelas > 1 ? ` · ${c.parcelas}x` : ""}${c.ajustePercentual ? ` · ${c.ajustePercentual > 0 ? "+" : ""}${String(c.ajustePercentual).replace(".", ",")}%` : ""}</option>`).join("");
+    formPedido.status.innerHTML = pd.status.map((st) => `<option${st === (p?.status || "Orçamento") ? " selected" : ""}>${esc(st)}</option>`).join("");
+    formPedido.desconto.value = p?.desconto || "";
+    formPedido.frete.value = p?.frete || "";
+    formPedido.observacoes.value = p?.observacoes || "";
+    itensPedido = p ? p.itens.map((i) => ({ produtoId: pd.produtos.some((x) => x.id === i.produtoId) ? i.produtoId : "", descricao: i.descricao, quantidade: i.quantidade, precoUnitario: i.precoUnitario })) : [{ produtoId: "", descricao: "", quantidade: 1, precoUnitario: 0 }];
+    renderItensPedido();
+    $("#pedido-historico").innerHTML = p?.historico?.length
+      ? `<h4>Histórico do status</h4>` + [...p.historico].reverse().map((h) => `<div><span class="pd-chip-mini ${CLASSE_STATUS[h.status] || ""}">${esc(h.status)}</span><time>${new Date(h.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time></div>`).join("")
+      : "";
+    modalPedido.showModal();
+    if (!p && !leadEscolhido) formPedido.leadId.focus();
+  }
+
+  formPedido.leadId.addEventListener("change", () => {
+    $("#campo-cliente-avulso").hidden = formPedido.leadId.value !== "__avulso";
+    renderItensPedido(); // a moeda acompanha o país do cliente
+  });
+  formPedido.condicaoId.addEventListener("change", renderTotaisPedido);
+  formPedido.desconto.addEventListener("input", renderTotaisPedido);
+  formPedido.frete.addEventListener("input", renderTotaisPedido);
+  $("#pedido-add-item").addEventListener("click", () => {
+    itensPedido.push({ produtoId: "", descricao: "", quantidade: 1, precoUnitario: 0 });
+    renderItensPedido();
+    $$("#pedido-itens .item-pedido select").at(-1)?.focus();
+  });
+  $("#pedido-itens").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-remover-item]");
+    if (!b) return;
+    itensPedido.splice(Number(b.dataset.removerItem), 1);
+    renderItensPedido();
+  });
+  $("#pedido-itens").addEventListener("input", (e) => {
+    const campo = e.target.dataset.campoItem;
+    if (!campo || campo === "produtoId") return;
+    itensPedido[Number(e.target.closest(".item-pedido").dataset.n)][campo] = e.target.value;
+    renderTotaisPedido();
+  });
+  $("#pedido-itens").addEventListener("change", (e) => {
+    if (e.target.dataset.campoItem !== "produtoId") return;
+    const item = itensPedido[Number(e.target.closest(".item-pedido").dataset.n)];
+    const produto = pd.produtos.find((p) => p.id === e.target.value);
+    item.produtoId = produto?.id || "";
+    if (produto) {
+      item.descricao = produto.nome;
+      item.precoUnitario = produto.preco;
+    }
+    renderItensPedido();
+  });
+
+  formPedido.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const avulso = formPedido.leadId.value === "__avulso";
+    if (!formPedido.leadId.value) return toast("Escolha o cliente do pedido", true);
+    if (avulso && !formPedido.clienteNome.value.trim()) return toast("Digite o nome do cliente", true);
+    const corpo = {
+      leadId: avulso ? "" : formPedido.leadId.value,
+      clienteNome: avulso ? formPedido.clienteNome.value.trim() : "",
+      itens: itensPedido.map((i) => ({ produtoId: i.produtoId, descricao: i.descricao, quantidade: Number(i.quantidade), precoUnitario: Number(i.precoUnitario) })),
+      condicaoId: formPedido.condicaoId.value,
+      status: formPedido.status.value,
+      desconto: Number(formPedido.desconto.value) || 0,
+      frete: Number(formPedido.frete.value) || 0,
+      observacoes: formPedido.observacoes.value,
+    };
+    const botao = $("#pedido-salvar");
+    botao.disabled = true;
+    try {
+      const salvo = pedidoEditado ? await api("PATCH", `/api/pedidos/${pedidoEditado.id}`, corpo) : await api("POST", "/api/pedidos", corpo);
+      modalPedido.close();
+      toast(pedidoEditado ? `Pedido #${salvo.numero} atualizado` : `Pedido #${salvo.numero} criado — ${dinheiro(salvo.total, salvo.moeda)}`);
+      await carregarPedidos();
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      botao.disabled = false;
+    }
+  });
+  $("#pedido-excluir").addEventListener("click", async () => {
+    const p = pedidoEditado;
+    if (await excluirRegistro(`/api/pedidos/${p.id}`, `Excluir o pedido #${p.numero} de ${p.cliente}?`, "Pedido excluído")) modalPedido.close();
+  });
+  $("#pedido-whatsapp").addEventListener("click", () => enviarPedidoWhatsApp(pedidoEditado.id));
+
+  // ---- produto e condição de pagamento ----
+  function ligarCadastro({ modal, form, titulo, excluir, rota, nomeItem, colecao, preencher, ler }) {
+    let editado = null;
+    const abrir = (id = null) => {
+      editado = id ? pd[colecao].find((x) => x.id === id) : null;
+      form.reset();
+      $(titulo).textContent = editado ? `Editar ${nomeItem}` : `Nov${nomeItem === "produto" ? "o" : "a"} ${nomeItem}`;
+      $(excluir).hidden = !editado;
+      preencher(editado);
+      modal.showModal();
+      form.nome.focus();
+    };
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        await (editado ? api("PATCH", `/api/${rota}/${editado.id}`, ler()) : api("POST", `/api/${rota}`, ler()));
+        modal.close();
+        toast(`${nomeItem[0].toUpperCase() + nomeItem.slice(1)} salv${nomeItem === "produto" ? "o" : "a"}`);
+        await carregarPedidos();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+    $(excluir).addEventListener("click", async () => {
+      if (await excluirRegistro(`/api/${rota}/${editado.id}`, `Excluir “${editado.nome}”? Os pedidos já feitos não mudam.`, "Excluído")) modal.close();
+    });
+    return abrir;
+  }
+  const formProduto = $("#form-produto");
+  const abrirProduto = ligarCadastro({
+    modal: $("#modal-produto"), form: formProduto, titulo: "#produto-titulo", excluir: "#produto-excluir", rota: "produtos", nomeItem: "produto", colecao: "produtos",
+    preencher: (p) => {
+      formProduto.nome.value = p?.nome || "";
+      formProduto.codigo.value = p?.codigo || "";
+      formProduto.unidade.value = p?.unidade || "un";
+      formProduto.preco.value = p ? p.preco : "";
+      formProduto.descricao.value = p?.descricao || "";
+      formProduto.ativo.checked = p ? p.ativo : true;
+    },
+    ler: () => ({ nome: formProduto.nome.value, codigo: formProduto.codigo.value, unidade: formProduto.unidade.value, preco: formProduto.preco.value === "" ? 0 : Number(formProduto.preco.value), descricao: formProduto.descricao.value, ativo: formProduto.ativo.checked }),
+  });
+  const formCondicao = $("#form-condicao");
+  const abrirCondicao = ligarCadastro({
+    modal: $("#modal-condicao"), form: formCondicao, titulo: "#condicao-titulo", excluir: "#condicao-excluir", rota: "condicoes", nomeItem: "condição de pagamento", colecao: "condicoes",
+    preencher: (c) => {
+      formCondicao.nome.value = c?.nome || "";
+      formCondicao.parcelas.value = c?.parcelas || 1;
+      formCondicao.ajustePercentual.value = c?.ajustePercentual || 0;
+      formCondicao.descricao.value = c?.descricao || "";
+      formCondicao.ativo.checked = c ? c.ativo : true;
+    },
+    ler: () => ({ nome: formCondicao.nome.value, parcelas: Number(formCondicao.parcelas.value), ajustePercentual: Number(formCondicao.ajustePercentual.value) || 0, descricao: formCondicao.descricao.value, ativo: formCondicao.ativo.checked }),
+  });
+
+  for (const dlg of [modalPedido, $("#modal-produto"), $("#modal-condicao")]) {
+    $$("[data-fechar]", dlg).forEach((b) => b.addEventListener("click", () => dlg.close()));
+    dlg.addEventListener("click", (e) => e.target === dlg && dlg.close());
+  }
+
+  // ---- no modal do lead: pedidos dele ----
+  function renderPedidosLead(lead) {
+    if (!lead) return;
+    const lista = pd.pedidos.filter((p) => p.leadId === lead.id);
+    $("#pedidos-lead").innerHTML = lista.length
+      ? lista.map((p) => `<div class="item pedido-do-lead" data-abrir-pedido="${p.id}" role="button" tabindex="0">
+          <div class="item-corpo"><strong>Pedido #${p.numero} <span class="pd-chip-mini ${CLASSE_STATUS[p.status] || ""}">${esc(p.status)}</span></strong>
+          <span class="fluxo">${dataCurta(p.criadoEm)} · ${p.itens.length} ${p.itens.length === 1 ? "item" : "itens"}${p.condicao ? ` · ${esc(p.condicao.nome)}` : ""}</span></div>
+          <strong class="valor">${dinheiro(p.total, p.moeda)}</strong>
+        </div>`).join("")
+      : `<p class="sem-msg">Nenhum pedido ainda.</p>`;
+  }
+  $("#pedidos-lead").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-abrir-pedido]");
+    if (b) abrirPedido(b.dataset.abrirPedido);
+  });
+  $("#lead-novo-pedido").addEventListener("click", () => abrirPedido(null, { leadId: estado.leadAberto }));
 
   // ---------- topo, abas e filtros ----------
   function trocarAba(aba) {
@@ -1689,6 +2173,16 @@
     }
   });
 
+  // ---------- versão do sistema (canto superior direito) ----------
+  async function mostrarVersao() {
+    const { versao, data } = await api("GET", "/api/versao");
+    const dataBr = data ? new Date(`${data}T12:00:00`).toLocaleDateString("pt-BR") : "";
+    const el = $("#versao");
+    el.textContent = `v${versao}${dataBr ? ` · ${dataBr}` : ""}`;
+    el.title = `Controle de Leads 2026 — versão ${versao}${dataBr ? `, criada em ${dataBr}` : ""}`;
+    el.hidden = false;
+  }
+
   // ---------- tempo real ----------
   let esperaConversas;
   function agendarConversas() {
@@ -1720,6 +2214,7 @@
       agendarConversas(); // etapa e nome do lead aparecem na lista de conversas
     });
     fonte.addEventListener("conversas", agendarConversas);
+    fonte.addEventListener("pedidos", () => carregarPedidos().catch(() => {}));
   }
 
   // A caixa de entrada ocupa a altura que sobra abaixo do topo (que muda de altura no celular).
@@ -1736,7 +2231,7 @@
     try {
       const [leads, config, wa] = await Promise.all([api("GET", "/api/leads"), api("GET", "/api/config"), api("GET", "/api/whatsapp")]);
       Object.assign(estado, { leads, config, whatsapp: wa });
-      await carregarConversas();
+      await Promise.all([carregarConversas(), carregarPedidos(), mostrarVersao()]);
     } catch (err) {
       toast("Não foi possível carregar os leads: " + err.message, true);
     }
