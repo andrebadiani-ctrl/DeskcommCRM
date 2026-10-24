@@ -230,6 +230,7 @@
     if (estado.aba === "whatsapp") renderWhatsApp();
     if (estado.aba === "conversas") renderConversas();
     if (estado.aba === "pedidos") renderPedidos();
+    if (estado.aba === "resultados") carregarPainel();
     renderPilula();
   }
 
@@ -255,8 +256,10 @@
     $("#painel-whatsapp").hidden = estado.aba !== "whatsapp";
     $("#painel-conversas").hidden = estado.aba !== "conversas";
     $("#painel-pedidos").hidden = estado.aba !== "pedidos";
-    const semFiltros = ["whatsapp", "conversas", "pedidos"].includes(estado.aba);
-    $("#kpis").hidden = estado.aba === "conversas" || estado.aba === "pedidos"; // Pedidos tem os próprios totais
+    $("#painel-resultados").hidden = estado.aba !== "resultados";
+    const semFiltros = ["whatsapp", "conversas", "pedidos", "resultados"].includes(estado.aba);
+    // Pedidos e Painel têm os próprios totais
+    $("#kpis").hidden = ["conversas", "pedidos", "resultados"].includes(estado.aba);
     $("#filtros").hidden = semFiltros;
     $("#btn-filtros").hidden = semFiltros;
 
@@ -2808,6 +2811,213 @@
   }
 
   // ---------- topo, abas e filtros ----------
+  // ---------- aba Painel (resultados) ----------
+  const rs = { dias: lerPreferencia("painelDias", "30"), moeda: "", dados: null, carregando: false, espera: null };
+  const pct = (x) => (x == null ? "—" : `${Math.round(x * 100)}%`);
+  const MESES_CURTOS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const nomeMes = (chave) => `${MESES_CURTOS[Number(chave.slice(5, 7)) - 1]}/${chave.slice(2, 4)}`;
+  const compacto = (v, m) =>
+    new Intl.NumberFormat(m === "EUR" ? "pt-PT" : "pt-BR", { style: "currency", currency: m, notation: "compact", maximumFractionDigits: 1 }).format(Number(v) || 0);
+  function tempo(min) {
+    if (min == null) return "—";
+    if (min < 1) return "menos de 1 min";
+    if (min < 60) return `${Math.round(min)} min`;
+    if (min < 48 * 60) {
+      const h = Math.floor(min / 60);
+      const m = Math.round(min % 60);
+      return m ? `${h}h ${m}min` : `${h}h`;
+    }
+    return `${String(Math.round((min / 1440) * 10) / 10).replace(".", ",")} dias`;
+  }
+  const vazioRs = (texto) => `<p class="rs-vazio">${esc(texto)}</p>`;
+
+  // Chamado a cada render da aba: junta pedidos seguidos (vários eventos chegam juntos).
+  function carregarPainel() {
+    clearTimeout(rs.espera);
+    rs.espera = setTimeout(buscarPainel, rs.dados ? 400 : 0);
+    if (!rs.dados) renderPainel();
+  }
+  async function buscarPainel() {
+    if (rs.carregando) return carregarPainel();
+    rs.carregando = true;
+    try {
+      rs.dados = await api("GET", `/api/painel?dias=${encodeURIComponent(rs.dias)}`);
+      renderPainel();
+    } catch (e) {
+      toast(e.message, "erro");
+    } finally {
+      rs.carregando = false;
+    }
+  }
+
+  function renderPainel() {
+    $$("[data-dias]").forEach((b) => b.classList.toggle("ativo", b.dataset.dias === rs.dias));
+    const d = rs.dados;
+    if (!d) {
+      $("#rs-cartoes").innerHTML = vazioRs("Carregando…");
+      return;
+    }
+    const moedas = Object.keys(d.vendas);
+    if (!moedas.includes(rs.moeda)) rs.moeda = moedas[0];
+    const sel = $("#rs-moeda");
+    sel.hidden = moedas.length < 2;
+    sel.innerHTML = moedas.map((m) => `<option value="${m}"${m === rs.moeda ? " selected" : ""}>${m === "EUR" ? "Euro (€)" : "Real (R$)"}</option>`).join("");
+    $("#rs-atualizado").textContent = `Atualizado às ${new Date(d.periodo.geradoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+    const v = d.vendas[rs.moeda];
+    const m = rs.moeda;
+    const nomePeriodo = d.periodo.dias ? (d.periodo.dias === 365 ? "nos últimos 12 meses" : `nos últimos ${d.periodo.dias} dias`) : "desde o começo";
+
+    const cartoes = [
+      ["Leads novos", d.leads.novos, nomePeriodo],
+      ["Conversão", pct(d.leads.conversao), d.leads.novos ? "dos leads novos já viraram Ganho" : "sem leads novos no período"],
+      ["Ganhos", d.leads.ganhos, d.leads.diasAteGanhar != null ? `levaram ${tempo(d.leads.diasAteGanhar * 1440)} para fechar (mediana)` : "leads que fecharam no período"],
+      ["Vendas", dinheiro(v.total, m), `${v.pedidos} ${v.pedidos === 1 ? "pedido" : "pedidos"}`],
+      ["Ticket médio", dinheiro(v.ticketMedio, m), "por pedido"],
+      ["Recebido", dinheiro(v.recebido, m), "parcelas pagas no período"],
+    ];
+    $("#rs-cartoes").innerHTML = cartoes
+      .map(([t, val, sub]) => `<div class="kpi"><span>${t}</span><strong>${esc(val)}</strong><small>${esc(sub)}</small></div>`)
+      .join("");
+
+    // Funil: cada barra é proporcional a quem entrou; ao lado, quanto passou da etapa anterior.
+    const base = d.leads.funil[0]?.alcancaram || 0;
+    $("#rs-funil").innerHTML = base
+      ? `<ol class="rs-funil">${d.leads.funil
+          .map((f, i) => {
+            const ant = i ? d.leads.funil[i - 1].alcancaram : 0;
+            const passagem = i && ant ? f.alcancaram / ant : null;
+            const dica = `${f.etapa}: ${f.alcancaram} de ${base} leads (${pct(f.alcancaram / base)})${passagem != null ? ` · ${pct(passagem)} dos que estavam em ${d.leads.funil[i - 1].etapa}` : ""}`;
+            return `<li tabindex="0" data-dica="${esc(dica)}" aria-label="${esc(dica)}">
+              <span class="rs-rotulo">${esc(f.etapa)}</span>
+              <span class="rs-trilho"><span class="rs-barra" style="width:${Math.max((f.alcancaram / base) * 100, f.alcancaram ? 1.5 : 0)}%"></span></span>
+              <strong>${f.alcancaram}</strong>
+              <small>${passagem != null ? `${pct(passagem)} passaram` : ""}</small>
+            </li>`;
+          })
+          .join("")}</ol>
+        <p class="rs-nota">${d.leads.perdidos} perdidos ou sem interesse no período · ${d.leads.emAberto} leads em aberto no funil hoje</p>`
+      : vazioRs("Nenhum lead entrou neste período.");
+
+    // Vendas por mês: uma série só, então sem legenda; valor escrito só no maior mês e no atual.
+    const maxMes = Math.max(...v.porMes.map((x) => x.total), 0);
+    const maiorIdx = v.porMes.findIndex((x) => x.total === maxMes);
+    $("#rs-meses").innerHTML = maxMes
+      ? `<div class="rs-colunas" role="list">${v.porMes
+          .map((x, i) => {
+            const dica = `${nomeMes(x.mes)}: ${dinheiro(x.total, m)} em ${x.pedidos} ${x.pedidos === 1 ? "pedido" : "pedidos"}`;
+            const rotulo = x.total && (i === maiorIdx || i === v.porMes.length - 1) ? `<em>${compacto(x.total, m)}</em>` : "";
+            return `<div class="rs-coluna" role="listitem" tabindex="0" data-dica="${esc(dica)}" aria-label="${esc(dica)}">
+              <div class="rs-coluna-area"><span style="height:${(x.total / maxMes) * 100}%">${rotulo}</span></div>
+              <small>${nomeMes(x.mes).slice(0, 3)}</small>
+            </div>`;
+          })
+          .join("")}</div>`
+      : vazioRs("Ainda não há pedidos confirmados nos últimos 12 meses.");
+
+    const maxOrigem = Math.max(...d.leads.porOrigem.map((o) => o.leads), 0);
+    $("#rs-origens").innerHTML = d.leads.porOrigem.length
+      ? `<table class="rs-tabela"><thead><tr><th>Origem</th><th class="rs-col-barra"></th><th class="num">Leads</th><th class="num">Ganhos</th><th class="num">Conversão</th></tr></thead><tbody>${d.leads.porOrigem
+          .map((o) => `<tr tabindex="0" data-dica="${esc(`${o.origem}: ${o.leads} leads, ${o.ganhos} ganhos (${pct(o.conversao)})`)}"><td>${esc(o.origem)}</td><td class="rs-col-barra"><span class="rs-barra" style="width:${(o.leads / maxOrigem) * 100}%"></span></td><td class="num">${o.leads}</td><td class="num">${o.ganhos}</td><td class="num">${pct(o.conversao)}</td></tr>`)
+          .join("")}</tbody></table>`
+      : vazioRs("Nenhum lead entrou neste período.");
+
+    const depois = Math.max(0, v.aReceber - v.atrasado - v.vence30dias);
+    $("#rs-receber").innerHTML = v.aReceber
+      ? `<div class="rs-receber-total"><span>Total em aberto</span><strong>${dinheiro(v.aReceber, m)}</strong></div>
+        <div class="rs-pilha" aria-hidden="true">${[["rs-atrasado", v.atrasado], ["rs-proximo", v.vence30dias], ["rs-depois", depois]]
+          .filter(([, x]) => x > 0)
+          .map(([c, x]) => `<span class="${c}" style="flex-grow:${x}"></span>`)
+          .join("")}</div>
+        <ul class="rs-legenda">
+          <li class="${v.atrasado ? "rs-alerta" : ""}"><i class="rs-atrasado"></i>${v.atrasado ? "⚠ " : ""}Atrasado<strong>${dinheiro(v.atrasado, m)}</strong></li>
+          <li><i class="rs-proximo"></i>Vence em até 30 dias<strong>${dinheiro(v.vence30dias, m)}</strong></li>
+          <li><i class="rs-depois"></i>Vence depois<strong>${dinheiro(depois, m)}</strong></li>
+        </ul>
+        ${v.atrasado ? `<button type="button" class="btn btn-secundario rs-ver-atrasados">Ver pedidos atrasados</button>` : ""}`
+      : vazioRs("Nenhuma parcela em aberto. Tudo recebido!");
+
+    $("#rs-vendedores").innerHTML = v.porVendedor.length
+      ? `<table class="rs-tabela"><thead><tr><th>Vendedor</th><th class="num">Pedidos</th><th class="num">Vendas</th><th class="num">Comissão</th></tr></thead><tbody>${v.porVendedor
+          .map((x) => `<tr><td>${esc(x.nome)}</td><td class="num">${x.pedidos}</td><td class="num">${dinheiro(x.total, m)}</td><td class="num">${dinheiro(x.comissao, m)}</td></tr>`)
+          .join("")}</tbody>${v.porVendedor.length > 1 ? `<tfoot><tr><td>Total</td><td class="num">${v.pedidos}</td><td class="num">${dinheiro(v.total, m)}</td><td class="num">${dinheiro(v.comissao, m)}</td></tr></tfoot>` : ""}</table>`
+      : vazioRs("Nenhuma venda no período.");
+
+    $("#rs-produtos").innerHTML = v.topProdutos.length
+      ? `<table class="rs-tabela"><thead><tr><th>Produto</th><th class="num">Qtd.</th><th class="num">Vendas</th></tr></thead><tbody>${v.topProdutos
+          .map((x) => `<tr><td>${esc(x.descricao)}</td><td class="num">${String(Math.round(x.quantidade * 100) / 100).replace(".", ",")}</td><td class="num">${dinheiro(x.total, m)}</td></tr>`)
+          .join("")}</tbody></table>`
+      : vazioRs("Nenhuma venda no período.");
+
+    const a = d.atendimento;
+    const maxHora = Math.max(...a.porHora, 0);
+    const pico = a.porHora.indexOf(maxHora);
+    const fuso = d.periodo.fuso.split("/").pop().replace(/_/g, " ");
+    $("#rs-atendimento").innerHTML = `<div class="rs-numeros">
+        <div><span>Tempo de resposta</span><strong>${tempo(a.respostaMedianaMin)}</strong><small>mediana entre a mensagem do cliente e a sua resposta</small></div>
+        <div><span>Respondidas em até 5 min</span><strong>${pct(a.respondidasEm5min)}</strong><small>das vezes em que o cliente escreveu</small></div>
+        <div class="${a.naFila ? "rs-alerta" : ""}"><span>Na fila agora</span><strong>${a.naFila}</strong><small>${a.naFila ? `esperando há até ${tempo(a.maiorEsperaMin)}` : "ninguém esperando"}</small></div>
+        <div><span>Espera na fila</span><strong>${tempo(a.esperaMedianaMin)}</strong><small>${a.atendidosDaFila} atendidos (mediana até a baixa)</small></div>
+        <div><span>Conversas</span><strong>${a.conversasAtivas}</strong><small>${a.recebidas} recebidas · ${a.enviadas} enviadas</small></div>
+      </div>
+      ${maxHora
+        ? `<h4 class="rs-subtitulo">Mensagens recebidas por hora do dia <small>(horário de ${esc(fuso)})${` · pico às ${pico}h`}</small></h4>
+          <div class="rs-colunas rs-horas" role="list">${a.porHora
+            .map((n, h) => {
+              const dica = `${h}h–${h + 1}h: ${n} ${n === 1 ? "mensagem" : "mensagens"}`;
+              return `<div class="rs-coluna" role="listitem" tabindex="0" data-dica="${esc(dica)}" aria-label="${esc(dica)}">
+                <div class="rs-coluna-area"><span style="height:${(n / maxHora) * 100}%"></span></div>
+                <small>${h % 3 === 0 ? `${h}h` : ""}</small>
+              </div>`;
+            })
+            .join("")}</div>`
+        : vazioRs("Nenhuma mensagem recebida no período.")}`;
+  }
+
+  $$("[data-dias]").forEach((b) =>
+    b.addEventListener("click", () => {
+      rs.dias = b.dataset.dias;
+      gravarPreferencia("painelDias", rs.dias);
+      renderPainel();
+      buscarPainel();
+    }),
+  );
+  $("#rs-moeda").addEventListener("change", (e) => {
+    rs.moeda = e.target.value;
+    renderPainel();
+  });
+  $("#painel-resultados").addEventListener("click", (e) => {
+    if (!e.target.closest(".rs-ver-atrasados")) return;
+    pd.aba = "pedidos";
+    pd.filtroPagamento = "Atrasado";
+    $("#pd-filtro-pagamento").value = "Atrasado";
+    trocarAba("pedidos");
+  });
+  // Dica ao passar o mouse (ou focar pelo teclado) sobre barras e linhas.
+  (() => {
+    const dica = $("#rs-dica");
+    const area = $("#painel-resultados");
+    const mostrar = (alvo, x, y) => {
+      dica.textContent = alvo.dataset.dica;
+      dica.hidden = false;
+      const r = dica.getBoundingClientRect();
+      dica.style.left = `${Math.min(Math.max(8, x - r.width / 2), window.innerWidth - r.width - 8)}px`;
+      dica.style.top = `${y - r.height - 12 < 8 ? y + 18 : y - r.height - 12}px`;
+    };
+    area.addEventListener("pointermove", (e) => {
+      const alvo = e.target.closest("[data-dica]");
+      if (alvo) mostrar(alvo, e.clientX, e.clientY);
+      else dica.hidden = true;
+    });
+    area.addEventListener("pointerleave", () => (dica.hidden = true));
+    area.addEventListener("focusin", (e) => {
+      const alvo = e.target.closest("[data-dica]");
+      if (!alvo) return;
+      const r = alvo.getBoundingClientRect();
+      mostrar(alvo, r.left + r.width / 2, r.top);
+    });
+    area.addEventListener("focusout", () => (dica.hidden = true));
+  })();
+
   function trocarAba(aba) {
     estado.aba = aba;
     gravarPreferencia("aba", aba);
@@ -2963,6 +3173,8 @@
     fonte.addEventListener("conversas", agendarConversas);
     fonte.addEventListener("pedidos", () => carregarPedidos().catch(() => {}));
     fonte.addEventListener("tarefas", () => carregarTarefas().catch(() => {}));
+    // O Painel soma tudo: qualquer mudança em leads, pedidos ou conversas o atualiza.
+    for (const tipo of ["leads", "pedidos", "conversas"]) fonte.addEventListener(tipo, () => estado.aba === "resultados" && carregarPainel());
     fonte.addEventListener("lembrete", (e) => mostrarLembrete(JSON.parse(e.data)));
     // Mensagem nova no WhatsApp: som e notificação, a não ser que a pessoa já esteja nela.
     fonte.addEventListener("mensagem-nova", (e) => {

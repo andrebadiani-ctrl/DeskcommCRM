@@ -13,6 +13,7 @@ import { ErroValidacao, Store, chaveTelefone } from "./store.mjs";
 import { Followups } from "./followups.mjs";
 import { LIMITE_IMPORTACAO, normalizarLinha } from "./importacao.mjs";
 import { paginaDoPedido } from "./impressao.mjs";
+import { resumoDoPainel } from "./painel.mjs";
 import { Pedidos, STATUS_PEDIDO, STATUS_VENDA, resumoPagamento } from "./pedidos.mjs";
 import { Tarefas } from "./tarefas.mjs";
 import { WhatsApp } from "./whatsapp.mjs";
@@ -139,6 +140,13 @@ if (SENHA) {
 const assincrono = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 app.get("/api/versao", (_req, res) => res.json({ data: VERSAO }));
+
+// Painel de resultados. ?dias=7|30|90|365; sem dias (ou 0) = desde o começo.
+app.get("/api/painel", (req, res) => {
+  const dias = Number(req.query.dias) || 0;
+  if (dias < 0 || dias > 3650) return res.status(400).json({ error: { message: "Período inválido" } });
+  res.json({ data: resumoDoPainel({ leads: store.listar(), pedidos: pedidos.listar(), conversas: [...conversas.mapa.values()], dias }) });
+});
 
 app.get("/api/leads", (_req, res) => res.json({ data: store.listar() }));
 

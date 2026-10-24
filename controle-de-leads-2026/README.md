@@ -38,6 +38,27 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
   - Totais por status no topo, busca, e **enviar o resumo do pedido pelo WhatsApp** ao cliente.
   - Pedido guarda uma cópia do produto e da condição: mudar o cadastro depois não altera pedidos feitos.
   - Também dá para criar pedido a partir do lead (modal do lead) e da conversa (botão *+ Pedido*).
+  - **Parcelas e recebimento:** a condição define o 1º vencimento e o intervalo; cada parcela é
+    marcada como paga no próprio pedido. Situação do pagamento (Pendente, Parcial, Atrasado, Pago)
+    na lista, com filtro.
+  - **Estoque (opcional por produto):** baixa ao confirmar, devolve ao cancelar ou excluir, e avisa
+    quando fica abaixo do mínimo.
+  - **Vendedores e comissão:** cadastro com % de comissão; o pedido calcula a comissão e a aba
+    *Vendedores* soma vendas e comissões de cada um.
+  - **Imprimir / PDF:** página do pedido com os dados da empresa (⚙ Empresa), itens, parcelas e
+    assinaturas — no navegador, *Imprimir › Salvar como PDF*.
+  - **Pedido confirmado leva o lead para "Ganho"** (dá para desligar em ⚙ Empresa).
+- **Painel de resultados** (aba *Painel*) — período de 7, 30, 90 dias, 12 meses ou tudo:
+  - Leads novos, conversão, ganhos e quanto tempo levaram para fechar; vendas, ticket médio e
+    valor recebido.
+  - **Funil:** dos leads que entraram no período, quantos chegaram a cada etapa e quantos passaram
+    de uma para a outra (o sistema guarda por onde cada lead passou).
+  - **Vendas por mês** (12 meses), **origem dos leads** com a conversão de cada canal, **contas a
+    receber** (atrasado, vence em 30 dias, depois), **vendedores** com comissão e **produtos mais
+    vendidos**.
+  - **Atendimento no WhatsApp:** tempo de resposta, % respondidas em até 5 minutos, fila agora,
+    espera até a baixa e os horários em que os clientes mais escrevem.
+  - Atualiza sozinho quando entra lead, pedido ou mensagem. Real e euro aparecem separados.
 - **Conversas (caixa de entrada do WhatsApp)**
   - A aba *Conversas* mostra as conversas do seu WhatsApp (as recentes chegam quando você conecta;
     as novas entram na hora), com busca e filtros *Todas / Não lidas / Sem lead / Leads*.

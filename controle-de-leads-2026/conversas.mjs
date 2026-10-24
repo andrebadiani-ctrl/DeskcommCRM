@@ -167,8 +167,11 @@ export class Conversas {
   darBaixa(jid) {
     const c = this.mapa.get(jid);
     if (!c) return undefined;
+    const agora = new Date().toISOString();
+    // Guarda quanto tempo esperou na fila: é o "tempo de espera" do Painel.
+    if (c.fila?.desde) c.esperas = [...(c.esperas || []), { desde: c.fila.desde, baixaEm: agora }].slice(-50);
     c.fila = null;
-    c.baixaEm = new Date().toISOString();
+    c.baixaEm = agora;
     this.agendarSalvar();
     return c;
   }

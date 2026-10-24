@@ -32,6 +32,7 @@ export const DISTRITOS = [
 const TEXTOS = ["nome", "email", "telefone", "cargo", "empresa", "observacoes", "cidade"];
 const LIMITE_TEXTO = 5000;
 const LIMITE_MENSAGENS = 200;
+const LIMITE_ETAPAS = 50;
 
 export class ErroValidacao extends Error {}
 
@@ -282,6 +283,8 @@ export class Store extends EventEmitter {
       optOut: false,
       ...dados,
       etapaDesde: agora,
+      // Por onde o lead passou: é o que permite o funil do Painel contar quem chegou a cada etapa.
+      etapas: [{ etapa: dados.etapa || "Novo Lead", em: agora }],
       atualizadoEm: agora,
     };
   }
@@ -341,6 +344,7 @@ export class Store extends EventEmitter {
     });
     if (lead.etapa !== anterior) {
       lead.etapaDesde = new Date().toISOString();
+      lead.etapas = [...(lead.etapas || []), { etapa: lead.etapa, em: lead.etapaDesde }].slice(-LIMITE_ETAPAS);
       this.emit("etapa", lead, anterior);
     }
     await this.salvar();
