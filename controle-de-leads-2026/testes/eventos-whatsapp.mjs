@@ -78,6 +78,36 @@ ev.emit("messages.upsert", { type: "notify", messages: [{ key: { remoteJid: "111
 const audio = msgs.at(-1);
 assert.equal(audio.jid, "5511999990001@s.whatsapp.net"); assert.equal(audio.midia.tipo, "audio"); assert.equal(audio.midia.mimetype, "audio/ogg"); assert.ok(audio.midia.wa.message.audioMessage.mediaKey);
 console.log("4 ok: áudio de contato LID vai para a conversa do número, com as chaves de download");
+// 5) Mensagem ilegível que volta legível depois do pedido de reenvio conta como recuperada
+ev.emit("messages.upsert", { type: "notify", messages: [{ key: { remoteJid: "5511999990001@s.whatsapp.net", id: "R1", fromMe: false }, messageStubType: 2, messageStubParameters: ["Bad MAC"], messageTimestamp: ts(0) }] });
+const falhasAntes = wa.diag.naoDescriptografadas;
+ev.emit("messages.upsert", { type: "notify", messages: [{ key: { remoteJid: "5511999990001@s.whatsapp.net", id: "R1", fromMe: false }, message: { conversation: "agora legível" }, messageTimestamp: ts(0) }] });
+assert.equal(wa.diag.naoDescriptografadas, falhasAntes - 1);
+assert.equal(wa.diag.recuperadas, 1);
+assert.equal(msgs.at(-1).texto, "agora legível");
+console.log("5 ok: mensagem reenviada pelo remetente entra e conta como recuperada");
+
+// 6) Sessão criada pela versão anterior (sem a marca) não reconecta sozinha e pede QR novo
+const { mkdir, writeFile } = await import("node:fs/promises");
+const { existsSync } = await import("node:fs");
+const DADOS2 = await mkdtemp(path.join(tmpdir(), "leads-teste-"));
+await mkdir(path.join(DADOS2, "whatsapp-auth"), { recursive: true });
+await writeFile(path.join(DADOS2, "whatsapp-auth", "creds.json"), JSON.stringify({ me: { id: "5511900000000:1@s.whatsapp.net" } }));
+const antigo = new WhatsApp(DADOS2);
+await antigo.iniciarSeHouverSessao();
+assert.equal(antigo.status, "desconectado");
+assert.match(antigo.erro, /QR Code/);
+assert.ok(existsSync(path.join(DADOS2, "whatsapp-auth", "creds.json")), "só descarta quando a pessoa pede o QR");
+// Sessão com a marca desta versão reconecta normalmente (não fica parada pedindo QR)
+await writeFile(path.join(DADOS2, "whatsapp-auth", "sessao-baileys7.json"), "{}");
+const atual = new WhatsApp(DADOS2);
+const tentou = new Promise((r) => atual.once("estado", (e) => r(e.status)));
+atual.iniciarSeHouverSessao();
+assert.equal(await tentou, "conectando");
+atual.parar();
+await rm(DADOS2, { recursive: true, force: true });
+console.log("6 ok: sessão da versão anterior pede QR novo; sessão desta versão reconecta");
+
 await conversas.salvarAgora();
 await rm(DADOS, { recursive: true, force: true });
 console.log("Todos os cenários passaram.");

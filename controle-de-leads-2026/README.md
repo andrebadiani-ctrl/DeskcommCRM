@@ -169,7 +169,12 @@ dos campos `version` e `dataVersao` do `package.json`.
    leia de novo. (Quem conectou numa versão antiga do sistema precisa fazer isso uma vez.)
 3. **Uma conversa mostra só as últimas mensagens**: dentro dela, use **↑ Carregar mensagens
    anteriores** (o celular manda em lotes; precisa estar com internet).
-4. **"Mensagens que não puderam ser lidas"** aumentando sem parar: desconecte e leia o QR Code de novo.
+4. **"Mensagens que não puderam ser lidas"**: logo depois de conectar, algumas são normais — o
+   sistema pede ao remetente que reenvie e elas entram como "recuperadas". Se o número só aumentar
+   por mais de 10 minutos, desconecte e leia o QR Code de novo.
+   Desde a v1.4.2 o sistema reconhece sessões criadas pela versão antiga (que causam esse erro) e
+   pede um QR Code novo automaticamente. Depois de ler, apague no celular, em *Dispositivos
+   conectados*, a conexão antiga do "Controle de Leads 2026" que ficar sobrando.
 5. Mande o arquivo `data/whatsapp.log` para quem dá suporte — ele tem o registro técnico.
 
 Desde a versão 1.4.1 o sistema usa a Baileys 7, que entende os contatos com **número oculto

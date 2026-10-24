@@ -408,6 +408,7 @@
       ["Mensagens do histórico", d.mensagensHistorico],
       ["Mensagens recebidas ao vivo", d.mensagensAoVivo],
       ["Mensagens que não puderam ser lidas (criptografia)", d.naoDescriptografadas],
+      ["Recuperadas depois de pedir reenvio", d.recuperadas ?? 0],
       ["Última mensagem recebida", quando(d.ultimaMensagemEm)],
       ["Último erro", d.ultimoErro || "nenhum"],
     ];
@@ -416,7 +417,9 @@
       avisos.push("O celular não mandou o histórico de conversas. Ele só faz isso quando o aparelho é <strong>conectado pela primeira vez</strong>: para receber as conversas antigas, clique em <strong>Desconectar</strong> e leia o QR Code de novo.");
     }
     if (d.naoDescriptografadas) {
-      avisos.push("Algumas mensagens chegaram mas não puderam ser lidas. Normalmente se resolve sozinho em poucos minutos; se continuar, desconecte e leia o QR Code de novo.");
+      avisos.push(d.sessaoNova
+        ? "Algumas mensagens chegaram mas ainda não puderam ser lidas. Logo depois de conectar isso é normal: o sistema pede ao remetente que reenvie e elas aparecem em seguida (contam como “recuperadas”). Se o número só aumentar por mais de 10 minutos, desconecte e leia o QR Code de novo."
+        : "Mensagens estão chegando ilegíveis. Clique em <strong>Desconectar</strong>, depois em <strong>Gerar QR Code</strong>, e leia com o celular para criar uma conexão nova.");
     }
     $("#wa-diag-conteudo").innerHTML =
       `<dl>${linhas.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("")}</dl>` +

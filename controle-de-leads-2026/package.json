@@ -1,6 +1,6 @@
 {
   "name": "controle-de-leads-2026",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "dataVersao": "2026-10-24",
   "private": true,
   "description": "CRM minimalista para controle de leads (Tabela + Kanban) com integração ao WhatsApp por QR Code",

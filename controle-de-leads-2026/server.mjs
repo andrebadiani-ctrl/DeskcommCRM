@@ -31,7 +31,10 @@ await pedidos.carregar();
 const conversas = new Conversas(DADOS);
 await conversas.carregar();
 // WA_SIMULADO=1: modo demonstração, sem celular (ver whatsapp-simulado.mjs).
-const whatsapp = process.env.WA_SIMULADO === "1" ? new WhatsAppSimulado() : new WhatsApp(DADOS);
+const whatsapp =
+  process.env.WA_SIMULADO === "1"
+    ? new WhatsAppSimulado()
+    : new WhatsApp(DADOS, { buscarMensagem: (id) => conversas.mensagemPorId(id) });
 
 // ---- eventos em tempo real (Server-Sent Events) ----
 const clientes = new Set();

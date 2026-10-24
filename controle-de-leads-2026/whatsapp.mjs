@@ -1,7 +1,7 @@
 // Integração com o WhatsApp (WhatsApp Web multi-device via Baileys), login por QR Code.
 import { EventEmitter } from "node:events";
 import { createWriteStream, existsSync, statSync, truncateSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   Browsers,
@@ -10,6 +10,7 @@ import {
   downloadMediaMessage,
   jidNormalizedUser,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
   makeWASocket,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
@@ -21,6 +22,10 @@ import { digitos } from "./store.mjs";
 const ehPn = (jid) => String(jid || "").endsWith("@s.whatsapp.net");
 const ehLid = (jid) => String(jid || "").endsWith("@lid");
 const STUB_CIPHERTEXT = 2; // mensagem que chegou mas não pôde ser descriptografada
+// Marca gravada junto da sessão quando ela é criada por esta versão da biblioteca. Sessão sem a
+// marca veio da Baileys 6 (sistema até a v1.4.0): as chaves dela não servem bem na 7 e as
+// mensagens chegam "failed to decrypt". Essa sessão é descartada e o QR Code é lido de novo.
+const MARCA_SESSAO = "sessao-baileys7.json";
 
 // Mensagens temporárias / de visualização única vêm embrulhadas.
 function desembrulhar(bruta = {}) {
@@ -70,8 +75,12 @@ export function tipoDeEnvio(mimetype) {
 }
 
 export class WhatsApp extends EventEmitter {
-  constructor(dir) {
+  /** `buscarMensagem(id)` devolve uma mensagem já enviada, para atender pedidos de reenvio. */
+  constructor(dir, { buscarMensagem } = {}) {
     super();
+    this.buscarMensagem = buscarMensagem;
+    this.idsComFalha = new Set();
+    this.pareouAgora = false;
     this.authDir = path.join(dir, "whatsapp-auth");
     // LID (contato com número oculto) → JID com o número. Vem dos contatos, das mensagens e do
     // mapa que o próprio WhatsApp manda; serve para não ter a mesma pessoa em duas conversas.
@@ -92,7 +101,7 @@ export class WhatsApp extends EventEmitter {
   }
 
   #diagZerado() {
-    return { conectadoEm: "", lotesHistorico: 0, conversasRecebidas: 0, mensagensHistorico: 0, mensagensAoVivo: 0, semConteudo: 0, naoDescriptografadas: 0, ultimaMensagemEm: "", ultimoErro: "" };
+    return { conectadoEm: "", sessaoNova: false, lotesHistorico: 0, conversasRecebidas: 0, mensagensHistorico: 0, mensagensAoVivo: 0, semConteudo: 0, naoDescriptografadas: 0, recuperadas: 0, ultimaMensagemEm: "", ultimoErro: "" };
   }
 
   /** Registro da biblioteca em data/whatsapp.log (avisos e erros); o último erro aparece na tela. */
@@ -138,12 +147,28 @@ export class WhatsApp extends EventEmitter {
   }
 
   /** Reconecta sozinho se já existe sessão salva. */
-  async iniciarSeHouverSessao() {
+  async #temSessao() {
     const arquivo = path.join(this.authDir, "creds.json");
-    if (!existsSync(arquivo)) return;
+    if (!existsSync(arquivo)) return false;
     // creds.json nasce já no primeiro QR; só há sessão de verdade depois da leitura (`me`).
     const creds = JSON.parse(await readFile(arquivo, "utf8").catch(() => "{}"));
-    if (creds.me) await this.conectar();
+    return !!creds.me;
+  }
+
+  #sessaoEhDestaVersao() {
+    return existsSync(path.join(this.authDir, MARCA_SESSAO));
+  }
+
+  async iniciarSeHouverSessao() {
+    if (!(await this.#temSessao())) return;
+    if (!this.#sessaoEhDestaVersao()) {
+      this.#mudar({
+        status: "desconectado",
+        erro: "O sistema foi atualizado e a conexão antiga com o WhatsApp precisa ser refeita (senão as mensagens chegam ilegíveis). Clique em “Gerar QR Code” e leia com o celular.",
+      });
+      return;
+    }
+    await this.conectar();
   }
 
   /** Interrompe a conexão/reconexão sem apagar a sessão salva. */
@@ -160,11 +185,25 @@ export class WhatsApp extends EventEmitter {
     this.parado = false;
     this.#mudar({ status: this.status === "reconectando" ? "reconectando" : "conectando", erro: null });
 
+    // Sessão da versão anterior: começa do zero (novo QR). Não vale logo depois de ler o QR,
+    // quando o WhatsApp pede para reabrir a conexão antes de a marca ser gravada.
+    if (!this.pareouAgora && (await this.#temSessao()) && !this.#sessaoEhDestaVersao()) {
+      await rm(this.authDir, { recursive: true, force: true });
+      this.logger.warn("sessão da versão anterior descartada; novo QR Code");
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
     const sock = makeWASocket({
       version,
-      auth: state,
+      // As chaves de criptografia ficam em cache na memória (recomendação da biblioteca): sem isso,
+      // mensagens chegando ao mesmo tempo disputam os arquivos e a descriptografia falha.
+      auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, this.logger) },
+      // Quando o celular de um cliente não consegue ler algo que enviamos, ele pede de novo.
+      getMessage: async (chave) => {
+        const m = this.buscarMensagem?.(chave.id);
+        return m?.texto && !m.midia ? { conversation: m.texto } : undefined;
+      },
       logger: this.logger,
       browser: Browsers.ubuntu("Controle de Leads 2026"),
       markOnlineOnConnect: false,
@@ -178,11 +217,16 @@ export class WhatsApp extends EventEmitter {
     sock.ev.on("connection.update", async (u) => {
       if (u.qr) {
         const qr = await QRCode.toDataURL(u.qr, { margin: 1, width: 300, color: { dark: "#0b3324", light: "#ffffff" } });
+        this.pareouAgora = true;
         this.#mudar({ status: "aguardando_qr", qr });
       }
       if (u.connection === "open") {
         this.tentativas = 0;
         this.diag.conectadoEm = new Date().toISOString();
+        if (this.pareouAgora || this.#sessaoEhDestaVersao()) {
+          await writeFile(path.join(this.authDir, MARCA_SESSAO), JSON.stringify({ criadaEm: new Date().toISOString() })).catch(() => {});
+          this.diag.sessaoNova = this.pareouAgora;
+        }
         const id = sock.user?.id || "";
         this.#mudar({
           status: "conectado",
@@ -246,9 +290,17 @@ export class WhatsApp extends EventEmitter {
       if (ehLid(jidOriginal) && !this.lidParaPn.has(jidOriginal)) this.#descobrirNumero(jidOriginal);
 
       if (m.messageStubType === STUB_CIPHERTEXT) {
-        this.diag.naoDescriptografadas += 1;
+        // A biblioteca pede ao remetente que reenvie; se a mensagem voltar legível, conta como recuperada.
+        if (!this.idsComFalha.has(m.key.id)) {
+          this.idsComFalha.add(m.key.id);
+          this.diag.naoDescriptografadas += 1;
+        }
         this.logger.warn({ jid: jidOriginal, motivo: m.messageStubParameters?.[0] }, "mensagem não descriptografada");
         return;
+      }
+      if (this.idsComFalha.delete(m.key.id)) {
+        this.diag.naoDescriptografadas -= 1;
+        this.diag.recuperadas += 1;
       }
       const { texto, midia } = conteudoDaMensagem(m);
       if (!texto && !midia) {
