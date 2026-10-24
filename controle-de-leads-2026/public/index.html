@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b3324" />
+  <title>Controle de Leads 2026</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b3324'/%3E%3Cpath d='M8 21l5-6 4 3 7-9' stroke='%2386efac' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-linha">
+      <div class="marca">
+        <span class="marca-icone" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 16l4.5-5.5 3.5 2.7L19 6" /></svg>
+        </span>
+        <div>
+          <h1>Controle de Leads 2026</h1>
+          <p>Funil de vendas · Tabela e Kanban</p>
+        </div>
+      </div>
+      <div class="busca">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+        <input id="busca" type="search" placeholder="Buscar por nome, empresa, cidade, e-mail, telefone…" autocomplete="off" />
+      </div>
+      <div class="topo-acoes">
+        <span id="wa-pilula" class="wa-pilula" title="Status do WhatsApp">WhatsApp</span>
+        <button id="btn-novo" class="btn btn-primario">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          <span>Novo lead</span>
+        </button>
+      </div>
+    </div>
+    <nav class="abas" role="tablist">
+      <button class="aba ativa" role="tab" data-aba="tabela">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 10v10" /></svg>Tabela
+      </button>
+      <button class="aba" role="tab" data-aba="kanban">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1.5" /><rect x="10" y="4" width="5" height="10" rx="1.5" /><rect x="17" y="4" width="4" height="13" rx="1.5" /></svg>Kanban
+      </button>
+      <button class="aba" role="tab" data-aba="whatsapp">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.3-3.9A8 8 0 1 1 8 19z" /></svg>WhatsApp
+      </button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="kpis" id="kpis" aria-label="Indicadores"></section>
+
+    <button type="button" class="btn btn-secundario so-celular" id="btn-filtros" aria-expanded="false" aria-controls="filtros">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>Filtros e ordenação
+    </button>
+
+    <section class="filtros" id="filtros">
+      <label>Etapa
+        <select id="f-etapa"><option value="">Todas as etapas</option></select>
+      </label>
+      <label>País
+        <select id="f-pais"><option value="">Todos</option><option>Brasil</option><option>Portugal</option></select>
+      </label>
+      <label>UF / Distrito
+        <select id="f-regiao"><option value="">Todas</option></select>
+      </label>
+      <label>Cidade
+        <input id="f-cidade" type="text" placeholder="Filtrar cidade" />
+      </label>
+      <label>Ordenar por
+        <select id="f-ordem">
+          <option value="criadoEm:desc">Mais recentes</option>
+          <option value="criadoEm:asc">Mais antigos</option>
+          <option value="faturamentoMensal:desc">Maior faturamento</option>
+          <option value="faturamentoMensal:asc">Menor faturamento</option>
+        </select>
+      </label>
+      <div class="filtros-acoes">
+        <button id="btn-limpar" class="btn btn-fantasma">Limpar filtros</button>
+        <button id="btn-csv" class="btn btn-secundario">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>Exportar CSV
+        </button>
+      </div>
+    </section>
+
+    <section class="painel" id="painel-tabela">
+      <div class="tabela-rolagem">
+        <table class="tabela" id="tabela">
+          <thead>
+            <tr>
+              <th data-ordem="criadoEm" class="ordenavel">Data de criação</th>
+              <th class="col-nome">Nome</th>
+              <th>E-mail</th>
+              <th>Telefone</th>
+              <th>Cargo</th>
+              <th>Empresa</th>
+              <th data-ordem="faturamentoMensal" class="ordenavel">Faturamento mensal</th>
+              <th>País</th>
+              <th>UF / Distrito</th>
+              <th>Cidade</th>
+              <th>Etapa do funil</th>
+              <th>Observações</th>
+              <th class="col-acoes">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-corpo"></tbody>
+        </table>
+      </div>
+      <p class="vazio" id="tabela-vazia" hidden>Nenhum lead encontrado com esses filtros.</p>
+    </section>
+
+    <section class="painel" id="painel-kanban" hidden>
+      <div class="kanban" id="kanban"></div>
+    </section>
+
+    <section class="painel" id="painel-whatsapp" hidden>
+      <div class="wa-cartao">
+        <div class="wa-cabecalho">
+          <div>
+            <h2>Conexão com o WhatsApp</h2>
+            <p id="wa-descricao">Conecte o seu WhatsApp lendo o QR Code com o celular.</p>
+          </div>
+          <span id="wa-status" class="selo">Desconectado</span>
+        </div>
+        <div class="wa-corpo">
+          <div class="wa-qr" id="wa-qr">
+            <div class="wa-qr-vazio">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3M21 14v7h-7" /></svg>
+              <span>O QR Code aparece aqui</span>
+            </div>
+          </div>
+          <div class="wa-passos">
+            <ol>
+              <li>Clique em <strong>Gerar QR Code</strong>.</li>
+              <li>No celular, abra o <strong>WhatsApp › Configurações › Dispositivos conectados</strong>.</li>
+              <li>Toque em <strong>Conectar um dispositivo</strong> e aponte a câmera para o QR Code.</li>
+            </ol>
+            <div class="wa-botoes">
+              <button id="btn-wa-conectar" class="btn btn-primario">Gerar QR Code</button>
+              <button id="btn-wa-desconectar" class="btn btn-perigo" hidden>Desconectar</button>
+            </div>
+            <label class="interruptor">
+              <input type="checkbox" id="cfg-auto" />
+              <span class="trilho"></span>
+              <span>Criar lead automaticamente quando um número novo mandar mensagem</span>
+            </label>
+            <p class="dica">Com o WhatsApp conectado, abra qualquer lead e use o botão <strong>WhatsApp</strong> para enviar mensagens. As mensagens recebidas aparecem no histórico do lead.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal do lead (criar / ver / editar) -->
+  <dialog id="modal" class="modal">
+    <form id="form-lead" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="modal-titulo">Novo lead</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label class="largo">Nome *<input name="nome" required maxlength="200" /></label>
+          <label>E-mail<input name="email" type="email" maxlength="200" /></label>
+          <label>Telefone<input name="telefone" type="tel" maxlength="40" placeholder="+55 11 99999-9999" /></label>
+          <label>Cargo<input name="cargo" maxlength="200" /></label>
+          <label>Empresa<input name="empresa" maxlength="200" /></label>
+          <label>Faturamento mensal<input name="faturamentoMensal" type="number" min="0" step="0.01" inputmode="decimal" /></label>
+          <label>Data de criação<input name="criadoEm" type="date" /></label>
+          <label>País
+            <select name="pais"><option value="">Selecione</option><option>Brasil</option><option>Portugal</option></select>
+          </label>
+          <label id="campo-uf" hidden>UF<select name="uf"></select></label>
+          <label id="campo-distrito" hidden>Distrito<select name="distrito"></select></label>
+          <label>Cidade<input name="cidade" maxlength="200" /></label>
+          <label>Etapa do funil<select name="etapa"></select></label>
+          <label class="largo">Observações<textarea name="observacoes" rows="4" maxlength="5000"></textarea></label>
+        </div>
+
+        <div class="nota-rapida" id="bloco-nota" hidden>
+          <input id="nota-texto" placeholder="Nota rápida (ex.: ligou pedindo retorno amanhã)" maxlength="1000" />
+          <button type="button" class="btn btn-secundario" id="btn-nota">Adicionar nota</button>
+        </div>
+
+        <div class="historico" id="bloco-wa" hidden>
+          <h3>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.3-3.9A8 8 0 1 1 8 19z" /></svg>
+            WhatsApp
+          </h3>
+          <div class="mensagens" id="mensagens"></div>
+          <div class="enviar">
+            <textarea id="wa-texto" rows="2" placeholder="Escreva uma mensagem…" maxlength="4000"></textarea>
+            <button type="button" class="btn btn-primario" id="btn-wa-enviar">Enviar</button>
+          </div>
+          <p class="dica" id="wa-aviso-modal"></p>
+        </div>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="btn-excluir" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario" id="btn-salvar">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="regioes.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
