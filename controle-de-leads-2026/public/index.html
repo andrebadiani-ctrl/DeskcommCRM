@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0b3324" />
   <title>Controle de Leads 2026</title>
+  <!-- Tema escolhido antes de desenhar a página (sem "piscar" claro ao abrir no escuro). -->
+  <script>try { var t = localStorage.getItem("cl2026:tema"); if (t === "claro" || t === "escuro") document.documentElement.dataset.tema = t; } catch (e) {}</script>
+  <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
+  <link rel="apple-touch-icon" href="icones/icone-180.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Leads 2026" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b3324'/%3E%3Cpath d='M8 21l5-6 4 3 7-9' stroke='%2386efac' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -30,6 +36,8 @@
       <div class="topo-acoes">
         <span class="versao" id="versao" hidden></span>
         <button type="button" class="topo-tarefas" id="btn-tarefas" title="Tarefas e lembretes"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2" /><path d="M8 2v4M16 2v4M4 9h16M8.5 14.5l2 2 4-4" /></svg><span class="topo-bolha" id="tarefas-bolha" hidden></span></button>
+        <button type="button" class="topo-tarefas" id="btn-instalar" title="Instalar o app neste aparelho" aria-label="Instalar o app" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5" /><path d="M5 19h14" /></svg></button>
+        <button type="button" class="topo-tarefas" id="btn-tema" aria-label="Tema"></button>
         <span id="wa-pilula" class="wa-pilula" title="Status do WhatsApp">WhatsApp</span>
         <button id="btn-novo" class="btn btn-primario">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>

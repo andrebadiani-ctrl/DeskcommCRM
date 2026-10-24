@@ -3380,12 +3380,58 @@
     }
   });
 
+  // ---------- tema (automático / claro / escuro) ----------
+  const TEMAS = {
+    auto: { proximo: "escuro", nome: "automático (segue o sistema)", icone: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" /></svg>` },
+    escuro: { proximo: "claro", nome: "escuro", icone: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>` },
+    claro: { proximo: "auto", nome: "claro", icone: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>` },
+  };
+  function aplicarTema(tema) {
+    if (tema === "auto") delete document.documentElement.dataset.tema;
+    else document.documentElement.dataset.tema = tema;
+    const t = TEMAS[tema];
+    const botao = $("#btn-tema");
+    botao.innerHTML = t.icone;
+    botao.title = `Tema: ${t.nome}. Clique para mudar para ${TEMAS[t.proximo].nome.split(" (")[0]}.`;
+    botao.setAttribute("aria-label", botao.title);
+  }
+  let tema = TEMAS[lerPreferencia("tema", "auto")] ? lerPreferencia("tema", "auto") : "auto";
+  aplicarTema(tema);
+  $("#btn-tema").addEventListener("click", () => {
+    tema = TEMAS[tema].proximo;
+    gravarPreferencia("tema", tema);
+    aplicarTema(tema);
+    toast(`Tema ${TEMAS[tema].nome}`);
+  });
+
+  // ---------- app instalável (PWA) ----------
+  // O navegador só oferece instalar em endereço seguro (https ou localhost). O service worker guarda
+  // a "casca" da tela para abrir mesmo sem rede; os dados vêm sempre do servidor.
+  if ("serviceWorker" in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+  let pedidoDeInstalacao = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault(); // mostra o nosso botão em vez do aviso automático
+    pedidoDeInstalacao = e;
+    $("#btn-instalar").hidden = false;
+  });
+  $("#btn-instalar").addEventListener("click", async () => {
+    if (!pedidoDeInstalacao) return;
+    pedidoDeInstalacao.prompt();
+    const { outcome } = await pedidoDeInstalacao.userChoice.catch(() => ({}));
+    pedidoDeInstalacao = null;
+    $("#btn-instalar").hidden = true;
+    if (outcome === "accepted") toast("App instalado! Ele aparece junto com os outros programas.");
+  });
+  window.addEventListener("appinstalled", () => ($("#btn-instalar").hidden = true));
+
   // ---------- versão do sistema (canto superior direito) ----------
   async function mostrarVersao() {
     const { versao, data } = await api("GET", "/api/versao");
     const dataBr = data ? new Date(`${data}T12:00:00`).toLocaleDateString("pt-BR") : "";
     const el = $("#versao");
-    el.textContent = `v${versao}${dataBr ? ` · ${dataBr}` : ""}`;
+    el.innerHTML = `v${esc(versao)}${dataBr ? `<span class="versao-data"> · ${esc(dataBr)}</span>` : ""}`; // a data some no celular estreito
     el.title = `Controle de Leads 2026 — versão ${versao}${dataBr ? `, criada em ${dataBr}` : ""}`;
     el.hidden = false;
   }

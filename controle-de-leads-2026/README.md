@@ -116,6 +116,18 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
     follow-ups pendentes são cancelados. Também dá para marcar à mão no lead.
   - As regras de exemplo vêm **pausadas**: nada é enviado até você ativar uma regra.
   - Os follow-ups só saem com o WhatsApp conectado e o servidor ligado; enquanto isso eles esperam.
+- **Modo escuro** — botão ◐ no topo: *automático* (segue o modo do computador/celular) → *escuro* →
+  *claro*. A escolha fica guardada naquele navegador.
+- **App instalável** — o sistema pode virar um "app" com ícone próprio, abrindo em janela sem barra
+  de endereço:
+  - **Computador (Chrome/Edge):** clique no botão ⬇ do topo (ou no ícone de instalar na barra de
+    endereço).
+  - **Android (Chrome):** menu ⋮ › *Instalar app* (ou *Adicionar à tela inicial*).
+  - **iPhone (Safari):** botão Compartilhar › *Adicionar à Tela de Início*.
+  - Só funciona em endereço seguro: no próprio computador (`http://localhost:3000`) ou em **https**
+    (veja *Acesso de fora da rede*). Pelo IP da rede local (`http://192.168…`) o navegador não
+    oferece instalar — continua funcionando normalmente pelo navegador.
+  - Sem internet o app abre a tela, mas os dados vêm sempre do servidor (nada fica salvo no aparelho).
 
 ## Instalação fácil (sem digitar comandos)
 
