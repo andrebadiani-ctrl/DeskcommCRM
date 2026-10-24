@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Controle de Leads 2026 — instala (na primeira vez) e inicia o sistema.
+cd "$(dirname "$0")" || exit 1
+
+echo
+echo "  Controle de Leads 2026"
+echo
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "  O Node.js não está instalado. Baixe a versão LTS em https://nodejs.org e rode este arquivo de novo."
+  exit 1
+fi
+
+if [ ! -d node_modules/express ]; then
+  echo "  Instalando o sistema (só na primeira vez)..."
+  npm install --omit=dev --no-audit --no-fund || { echo "  Não foi possível instalar. Confira a internet."; exit 1; }
+fi
+
+if [ ! -s senha.txt ]; then
+  echo "  Crie uma senha para entrar no painel (protege seus leads e o seu WhatsApp)."
+  while [ -z "$NOVASENHA" ]; do read -r -s -p "  Senha: " NOVASENHA; echo; done
+  printf '%s\n' "$NOVASENHA" > senha.txt
+  chmod 600 senha.txt
+fi
+
+APP_PASSWORD="$(head -n1 senha.txt)" ABRIR_NAVEGADOR=1 exec node server.mjs

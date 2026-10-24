@@ -47,7 +47,22 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
   - As regras de exemplo vêm **pausadas**: nada é enviado até você ativar uma regra.
   - Os follow-ups só saem com o WhatsApp conectado e o servidor ligado; enquanto isso eles esperam.
 
-## Como rodar
+## Instalação fácil (sem digitar comandos)
+
+1. Instale o **Node.js** (versão **LTS**) em <https://nodejs.org> — é só avançar até o fim.
+2. Descompacte a pasta `controle-de-leads-2026` em um lugar fixo (ex.: Documentos).
+3. Dê dois cliques em:
+   - **Windows:** `INICIAR-WINDOWS.bat`
+     (se aparecer "O Windows protegeu o computador", clique em *Mais informações › Executar assim mesmo*)
+   - **Mac / Linux:** `iniciar-mac-linux.sh` (ou, no Terminal, `./iniciar-mac-linux.sh`)
+4. Na primeira vez ele instala tudo sozinho e pede para você **criar uma senha** (use letras e números).
+5. O navegador abre no sistema. Login: **qualquer nome de usuário** + a **sua senha**.
+6. **Deixe a janela preta aberta** enquanto usa — fechá-la desliga o CRM e o WhatsApp.
+
+Para trocar a senha, apague o arquivo `senha.txt` da pasta e inicie de novo.
+Seus dados ficam na pasta `data/` — copie essa pasta para fazer backup.
+
+## Como rodar (pelo terminal)
 
 Requer Node.js 20 ou mais novo.
 

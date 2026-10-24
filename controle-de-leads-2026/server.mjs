@@ -1,4 +1,5 @@
 // Controle de Leads 2026 — servidor HTTP (API REST + eventos em tempo real + frontend estático).
+import { spawn } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
@@ -206,7 +207,19 @@ app.listen(PORTA, () => {
     .map((i) => i.address);
   for (const ip of ipsDaRede) console.info(`Na rede local: http://${ip}:${PORTA}`);
   if (!SENHA) console.warn("Aviso: APP_PASSWORD não definida — o painel está sem senha.");
+  if (process.env.ABRIR_NAVEGADOR === "1") abrirNavegador(`http://localhost:${PORTA}`);
   followups.iniciar();
   whatsapp.iniciarSeHouverSessao().catch((e) => console.error("WhatsApp:", e));
 });
 
+
+// Usado pelos atalhos de início (INICIAR-WINDOWS.bat / iniciar-mac-linux.sh).
+function abrirNavegador(url) {
+  const [cmd, args] =
+    process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
+  try {
+    spawn(cmd, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref();
+  } catch {
+    // sem navegador (servidor sem tela): o endereço já foi mostrado no terminal
+  }
+}
