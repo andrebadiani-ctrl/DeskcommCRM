@@ -1,0 +1,3 @@
+# O cmd.exe do Windows precisa de CRLF para os "goto" funcionarem.
+*.bat text eol=crlf
+*.sh text eol=lf
