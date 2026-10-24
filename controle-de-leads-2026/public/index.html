@@ -139,9 +139,14 @@
           <button class="segmento ativo" data-pd-aba="pedidos">Pedidos</button>
           <button class="segmento" data-pd-aba="produtos">Produtos</button>
           <button class="segmento" data-pd-aba="condicoes">Condições de pagamento</button>
+          <button class="segmento" data-pd-aba="vendedores">Vendedores</button>
         </div>
         <div class="pd-acoes">
           <input type="search" id="pd-busca" placeholder="Buscar pedido, cliente ou produto" autocomplete="off" />
+          <select id="pd-filtro-pagamento" aria-label="Filtrar por pagamento">
+            <option value="">Pagamento: todos</option><option>Pendente</option><option>Parcial</option><option>Atrasado</option><option>Pago</option>
+          </select>
+          <button class="btn btn-fantasma" id="pd-config" title="Dados da empresa e regras">⚙ Empresa</button>
           <button class="btn btn-primario" id="pd-novo">+ Novo pedido</button>
         </div>
       </div>
@@ -160,7 +165,7 @@
       <div id="pd-lista-produtos" hidden>
         <div class="tabela-rolagem pd-tabela">
           <table class="tabela">
-            <thead><tr><th>Código</th><th>Produto</th><th>Unidade</th><th class="num">Preço</th><th>Ativo</th><th class="col-acoes">Ações</th></tr></thead>
+            <thead><tr><th>Código</th><th>Produto</th><th>Unidade</th><th class="num">Preço</th><th class="num">Estoque</th><th>Ativo</th><th class="col-acoes">Ações</th></tr></thead>
             <tbody id="pr-corpo"></tbody>
           </table>
         </div>
@@ -170,11 +175,21 @@
       <div id="pd-lista-condicoes" hidden>
         <div class="tabela-rolagem pd-tabela">
           <table class="tabela">
-            <thead><tr><th>Condição</th><th>Parcelas</th><th>Desconto / acréscimo</th><th>Observação</th><th>Ativa</th><th class="col-acoes">Ações</th></tr></thead>
+            <thead><tr><th>Condição</th><th>Parcelas</th><th>Vencimentos</th><th>Desconto / acréscimo</th><th>Observação</th><th>Ativa</th><th class="col-acoes">Ações</th></tr></thead>
             <tbody id="cp-corpo"></tbody>
           </table>
         </div>
         <p class="vazio" id="cp-vazio" hidden>Nenhuma condição de pagamento cadastrada.</p>
+      </div>
+
+      <div id="pd-lista-vendedores" hidden>
+        <div class="tabela-rolagem pd-tabela">
+          <table class="tabela">
+            <thead><tr><th>Vendedor</th><th class="num">Comissão</th><th class="num">Vendas (fechadas)</th><th class="num">Comissão a pagar</th><th>Ativo</th><th class="col-acoes">Ações</th></tr></thead>
+            <tbody id="vd-corpo"></tbody>
+          </table>
+        </div>
+        <p class="vazio" id="vd-vazio" hidden>Nenhum vendedor cadastrado. Cadastre para registrar quem fez cada venda e calcular a comissão.</p>
       </div>
     </section>
 
@@ -503,17 +518,20 @@
         <div class="grade">
           <label>Condição de pagamento<select name="condicaoId" id="pedido-condicao"></select></label>
           <label>Status<select name="status" id="pedido-status"></select></label>
+          <label>Vendedor<select name="vendedorId" id="pedido-vendedor"></select></label>
           <label>Desconto (valor)<input name="desconto" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00" /></label>
           <label>Frete (valor)<input name="frete" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00" /></label>
           <label class="largo">Observações<textarea name="observacoes" rows="2" maxlength="2000" placeholder="Prazo de entrega, endereço, combinados…"></textarea></label>
         </div>
 
         <div class="totais" id="pedido-totais"></div>
+        <div class="parcelas-pedido" id="pedido-parcelas"></div>
         <div class="historico-status" id="pedido-historico"></div>
       </div>
       <div class="modal-rodape">
         <button type="button" class="btn btn-perigo-leve" id="pedido-excluir" hidden>Excluir</button>
         <button type="button" class="btn btn-secundario" id="pedido-whatsapp" hidden>Enviar resumo no WhatsApp</button>
+        <a class="btn btn-secundario" id="pedido-imprimir" target="_blank" rel="noopener" hidden>Imprimir / PDF</a>
         <span class="espaco"></span>
         <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
         <button type="submit" class="btn btn-primario" id="pedido-salvar">Salvar pedido</button>
@@ -535,6 +553,9 @@
           <label>Unidade<input name="unidade" maxlength="12" placeholder="un, kg, cx, mês…" /></label>
           <label>Preço *<input name="preco" type="number" min="0" step="0.01" inputmode="decimal" /></label>
           <label class="check-campo"><span>&nbsp;</span><span class="check"><input type="checkbox" name="ativo" checked /> Ativo (aparece nos pedidos)</span></label>
+          <label class="largo"><span class="check"><input type="checkbox" name="controlarEstoque" /> Controlar estoque (baixa quando o pedido é confirmado, volta se for cancelado)</span></label>
+          <label class="campo-estoque">Estoque atual<input name="estoque" type="number" step="any" inputmode="decimal" /></label>
+          <label class="campo-estoque">Avisar quando ficar abaixo de<input name="estoqueMinimo" type="number" min="0" step="any" inputmode="decimal" /></label>
           <label class="largo">Descrição<textarea name="descricao" rows="3" maxlength="1000"></textarea></label>
         </div>
       </div>
@@ -559,6 +580,8 @@
           <label class="largo">Nome *<input name="nome" maxlength="100" placeholder="Ex.: PIX à vista, Cartão 3x, Boleto 30/60/90" /></label>
           <label>Parcelas<input name="parcelas" type="number" min="1" max="48" step="1" value="1" /></label>
           <label>Desconto (−) ou acréscimo (+) em %<input name="ajustePercentual" type="number" min="-100" max="100" step="0.01" value="0" /></label>
+          <label>1ª parcela vence em (dias)<input name="primeiroVencimentoDias" type="number" min="0" max="365" step="1" value="0" /></label>
+          <label>Intervalo entre parcelas (dias)<input name="intervaloDias" type="number" min="1" max="365" step="1" value="30" /></label>
           <label class="largo">Observação<input name="descricao" maxlength="300" placeholder="Ex.: 5% de desconto, sem juros…" /></label>
           <label class="largo"><span class="check"><input type="checkbox" name="ativo" checked /> Ativa (aparece nos pedidos)</span></label>
         </div>
@@ -569,6 +592,56 @@
         <span class="espaco"></span>
         <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
         <button type="submit" class="btn btn-primario">Salvar condição</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Vendedor -->
+  <dialog id="modal-vendedor" class="modal modal-pequeno">
+    <form id="form-vendedor" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="vendedor-titulo">Novo vendedor</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label>Nome *<input name="nome" maxlength="100" /></label>
+          <label>Comissão (%)<input name="comissaoPercentual" type="number" min="0" max="100" step="0.01" value="0" /></label>
+          <label class="largo"><span class="check"><input type="checkbox" name="ativo" checked /> Ativo (aparece nos pedidos)</span></label>
+        </div>
+        <p class="dica">A comissão é calculada sobre o total do pedido e conta só para vendas fechadas (Confirmado em diante; cancelado não conta).</p>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="vendedor-excluir" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar vendedor</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dados da empresa e regras dos pedidos -->
+  <dialog id="modal-pd-config" class="modal modal-pequeno">
+    <form id="form-pd-config" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2>Dados da empresa</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <p class="dica">Aparecem no cabeçalho do pedido impresso / PDF.</p>
+        <div class="grade">
+          <label class="largo">Nome da empresa<input name="nome" maxlength="120" /></label>
+          <label>CNPJ / NIF<input name="documento" maxlength="40" /></label>
+          <label>Telefone<input name="telefone" maxlength="40" /></label>
+          <label class="largo">E-mail<input name="email" maxlength="120" /></label>
+          <label class="largo">Endereço<input name="endereco" maxlength="300" /></label>
+          <label class="largo"><span class="check"><input type="checkbox" name="moverLeadParaGanho" /> Quando um pedido for confirmado, mover o lead para “Ganho” no Kanban</span></label>
+        </div>
+      </div>
+      <div class="modal-rodape">
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar</button>
       </div>
     </form>
   </dialog>

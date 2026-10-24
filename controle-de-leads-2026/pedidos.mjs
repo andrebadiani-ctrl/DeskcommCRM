@@ -6,6 +6,8 @@ import path from "node:path";
 import { ErroValidacao } from "./store.mjs";
 
 export const STATUS_PEDIDO = ["Orçamento", "Confirmado", "Em separação", "Enviado", "Entregue", "Cancelado"];
+/** Status de venda fechada: tiram do estoque, contam comissão e podem mover o lead para "Ganho". */
+export const STATUS_VENDA = ["Confirmado", "Em separação", "Enviado", "Entregue"];
 const MAX_ITENS = 100;
 
 const texto = (v, max) => String(v ?? "").trim().slice(0, max);
@@ -26,20 +28,29 @@ export class Pedidos {
   constructor(dir) {
     this.dir = dir;
     this.arquivo = path.join(dir, "pedidos.json");
-    this.dados = { produtos: [], condicoes: [], pedidos: [], proximoNumero: 1 };
+    this.dados = { produtos: [], condicoes: [], vendedores: [], pedidos: [], proximoNumero: 1, config: {} };
     this.fila = Promise.resolve();
   }
 
   async carregar() {
     await mkdir(this.dir, { recursive: true });
+    let novo = false;
     try {
       this.dados = { ...this.dados, ...JSON.parse(await readFile(this.arquivo, "utf8")) };
+      this.dados.vendedores ||= [];
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
       this.dados.produtos = produtosDeExemplo();
       this.dados.condicoes = condicoesDeExemplo();
-      await this.salvar();
+      novo = true;
     }
+    // Configuração (dados da empresa para o pedido impresso e regras automáticas).
+    const config = this.dados.config || {};
+    this.dados.config = {
+      moverLeadParaGanho: config.moverLeadParaGanho ?? true,
+      empresa: { nome: "", documento: "", telefone: "", email: "", endereco: "", ...(config.empresa || {}) },
+    };
+    if (novo) await this.salvar();
   }
 
   salvar() {
@@ -69,11 +80,15 @@ export class Pedidos {
     if ("unidade" in e) s.unidade = texto(e.unidade, 12) || "un";
     if ("descricao" in e) s.descricao = texto(e.descricao, 1000);
     if ("ativo" in e) s.ativo = booleano(e.ativo, "ativo");
+    if ("controlarEstoque" in e) s.controlarEstoque = booleano(e.controlarEstoque, "controlarEstoque");
+    // Estoque pode ficar negativo (venda antes de repor); o mínimo só serve de alerta.
+    if ("estoque" in e) s.estoque = Math.round(numero(e.estoque ?? 0, { campo: "Estoque", min: -1e7, max: 1e7 }) * 1000) / 1000;
+    if ("estoqueMinimo" in e) s.estoqueMinimo = numero(e.estoqueMinimo ?? 0, { campo: "Estoque mínimo", max: 1e7 });
     return s;
   }
 
   async criarProduto(e) {
-    const p = { id: randomUUID(), codigo: "", unidade: "un", descricao: "", ativo: true, ...this.#validarProduto(e), criadoEm: new Date().toISOString() };
+    const p = { id: randomUUID(), codigo: "", unidade: "un", descricao: "", ativo: true, controlarEstoque: false, estoque: 0, estoqueMinimo: 0, ...this.#validarProduto(e), criadoEm: new Date().toISOString() };
     this.dados.produtos.push(p);
     await this.salvar();
     return p;
@@ -112,11 +127,15 @@ export class Pedidos {
     if ("ajustePercentual" in e) s.ajustePercentual = numero(e.ajustePercentual ?? 0, { campo: "Desconto/acréscimo", min: -100, max: 100 });
     if ("descricao" in e) s.descricao = texto(e.descricao, 300);
     if ("ativo" in e) s.ativo = booleano(e.ativo, "ativo");
+    // Prazos: em quantos dias vence a 1ª parcela e de quantos em quantos dias vêm as outras.
+    if ("primeiroVencimentoDias" in e) s.primeiroVencimentoDias = numero(e.primeiroVencimentoDias ?? 0, { campo: "Dias até a 1ª parcela", max: 365, inteiro: true });
+    if ("intervaloDias" in e) s.intervaloDias = numero(e.intervaloDias ?? 30, { campo: "Intervalo entre parcelas", min: 1, max: 365, inteiro: true });
     return s;
   }
 
   async criarCondicao(e) {
-    const c = { id: randomUUID(), ajustePercentual: 0, descricao: "", ativo: true, ...this.#validarCondicao(e), criadoEm: new Date().toISOString() };
+    const dados = this.#validarCondicao(e);
+    const c = { id: randomUUID(), ajustePercentual: 0, descricao: "", ativo: true, primeiroVencimentoDias: dados.parcelas > 1 ? 30 : 0, intervaloDias: 30, ...dados, criadoEm: new Date().toISOString() };
     this.dados.condicoes.push(c);
     await this.salvar();
     return c;
@@ -136,6 +155,75 @@ export class Pedidos {
     if (this.dados.condicoes.length === antes) return false;
     await this.salvar();
     return true;
+  }
+
+  // ---------- vendedores (comissão) ----------
+  #validarVendedor(e, { parcial = false, id = null } = {}) {
+    if (!e || typeof e !== "object") throw new ErroValidacao("Corpo inválido");
+    const s = {};
+    if ("nome" in e || !parcial) {
+      s.nome = texto(e.nome, 100);
+      if (!s.nome) throw new ErroValidacao("O vendedor precisa de um nome");
+      if (this.dados.vendedores.some((v) => v.id !== id && v.nome.toLowerCase() === s.nome.toLowerCase())) throw new ErroValidacao(`Já existe o vendedor “${s.nome}”`);
+    }
+    if ("comissaoPercentual" in e || !parcial) s.comissaoPercentual = numero(e.comissaoPercentual ?? 0, { campo: "Comissão", max: 100 });
+    if ("ativo" in e) s.ativo = booleano(e.ativo, "ativo");
+    return s;
+  }
+
+  async criarVendedor(e) {
+    const v = { id: randomUUID(), ativo: true, ...this.#validarVendedor(e), criadoEm: new Date().toISOString() };
+    this.dados.vendedores.push(v);
+    await this.salvar();
+    return v;
+  }
+
+  async atualizarVendedor(id, e) {
+    const v = this.dados.vendedores.find((x) => x.id === id);
+    if (!v) return undefined;
+    Object.assign(v, this.#validarVendedor(e, { parcial: true, id }));
+    await this.salvar();
+    return v;
+  }
+
+  async excluirVendedor(id) {
+    const antes = this.dados.vendedores.length;
+    this.dados.vendedores = this.dados.vendedores.filter((v) => v.id !== id);
+    if (this.dados.vendedores.length === antes) return false;
+    await this.salvar();
+    return true;
+  }
+
+  async atualizarConfig(e) {
+    if (!e || typeof e !== "object") throw new ErroValidacao("Corpo inválido");
+    if ("moverLeadParaGanho" in e) this.dados.config.moverLeadParaGanho = booleano(e.moverLeadParaGanho, "moverLeadParaGanho");
+    if (e.empresa && typeof e.empresa === "object") {
+      const campos = { nome: 120, documento: 40, telefone: 40, email: 120, endereco: 300 };
+      for (const [k, max] of Object.entries(campos)) if (k in e.empresa) this.dados.config.empresa[k] = texto(e.empresa[k], max);
+    }
+    await this.salvar();
+    return this.dados.config;
+  }
+
+  // ---------- estoque ----------
+  /** Quanto de cada produto um pedido consome (só quando é venda fechada). */
+  #consumo(pedido) {
+    const m = new Map();
+    if (!pedido || !STATUS_VENDA.includes(pedido.status)) return m;
+    for (const i of pedido.itens) if (i.produtoId) m.set(i.produtoId, (m.get(i.produtoId) || 0) + i.quantidade);
+    return m;
+  }
+
+  /** Acerta o estoque pela diferença entre o pedido antes e depois (confirmar, editar, cancelar, excluir). */
+  #ajustarEstoque(antes, depois) {
+    const a = this.#consumo(antes);
+    const d = this.#consumo(depois);
+    for (const id of new Set([...a.keys(), ...d.keys()])) {
+      const produto = this.dados.produtos.find((p) => p.id === id);
+      if (!produto?.controlarEstoque) continue;
+      const delta = (d.get(id) || 0) - (a.get(id) || 0);
+      if (delta) produto.estoque = Math.round(((produto.estoque || 0) - delta) * 1000) / 1000;
+    }
   }
 
   // ---------- pedidos ----------
@@ -173,6 +261,16 @@ export class Pedidos {
     const status = "status" in e ? e.status : atual?.status || "Orçamento";
     if (!STATUS_PEDIDO.includes(status)) throw new ErroValidacao("Status do pedido inválido");
 
+    const vendedorId = "vendedorId" in e ? e.vendedorId || "" : atual?.vendedor?.id || "";
+    let vendedor = null;
+    if (vendedorId) {
+      const v = this.dados.vendedores.find((x) => x.id === vendedorId);
+      vendedor = v ? { id: v.id, nome: v.nome, comissaoPercentual: v.comissaoPercentual } : atual?.vendedor?.id === vendedorId ? atual.vendedor : null;
+      if (!vendedor) throw new ErroValidacao("Vendedor não encontrado");
+    }
+
+    const pagamentos = this.#parcelas({ total, parcelas, condicao, base: atual?.criadoEm || new Date().toISOString(), atual });
+
     return {
       leadId: lead?.id || "",
       cliente: lead ? lead.nome : texto(e.clienteNome ?? atual?.cliente, 200),
@@ -186,13 +284,52 @@ export class Pedidos {
       total,
       parcelas,
       valorParcela: centavos(total / parcelas),
+      pagamentos,
+      vendedor,
+      comissao: vendedor ? centavos((total * vendedor.comissaoPercentual) / 100) : 0,
       observacoes: "observacoes" in e ? texto(e.observacoes, 2000) : atual?.observacoes || "",
       status,
     };
   }
 
+  /**
+   * Parcelas com vencimento. Se já há parcela paga, o pedido não pode mudar de valor ou de número
+   * de parcelas sem antes desmarcar o pagamento (senão o dinheiro recebido fica sem dono).
+   */
+  #parcelas({ total, parcelas, condicao, base, atual }) {
+    const valores = Array.from({ length: parcelas }, (_, i) => (i < parcelas - 1 ? Math.floor((total / parcelas) * 100) / 100 : 0));
+    valores[parcelas - 1] = centavos(total - valores.slice(0, -1).reduce((s, v) => s + v, 0));
+    const anteriores = atual?.pagamentos || [];
+    const iguais = anteriores.length === parcelas && anteriores.every((p, i) => p.valor === valores[i]);
+    if (iguais) return anteriores; // mantém pagamentos marcados e vencimentos ajustados à mão
+    if (anteriores.some((p) => p.pagaEm)) throw new ErroValidacao("Este pedido já tem parcela paga: desmarque o pagamento antes de mudar valores, itens ou a condição de pagamento.");
+    const primeiro = condicao?.primeiroVencimentoDias ?? (parcelas > 1 ? 30 : 0);
+    const intervalo = condicao?.intervaloDias || 30;
+    const inicio = new Date(base);
+    return valores.map((valor, i) => {
+      const venc = new Date(inicio);
+      venc.setDate(venc.getDate() + primeiro + i * intervalo);
+      return { numero: i + 1, valor, vencimento: venc.toISOString().slice(0, 10), pagaEm: "" };
+    });
+  }
+
+  /** Marca/desmarca uma parcela como paga ou muda o vencimento dela. */
+  async atualizarParcela(id, numeroParcela, e) {
+    const pedido = this.obter(id);
+    const parcela = pedido?.pagamentos?.find((p) => p.numero === Number(numeroParcela));
+    if (!parcela) return undefined;
+    if ("paga" in e) parcela.pagaEm = booleano(e.paga, "paga") ? (e.pagaEm && !Number.isNaN(new Date(e.pagaEm).getTime()) ? new Date(e.pagaEm).toISOString() : new Date().toISOString()) : "";
+    if ("vencimento" in e) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(e.vencimento)) || Number.isNaN(new Date(e.vencimento).getTime())) throw new ErroValidacao("Data de vencimento inválida");
+      parcela.vencimento = e.vencimento;
+    }
+    pedido.atualizadoEm = new Date().toISOString();
+    await this.salvar();
+    return pedido;
+  }
+
   listar() {
-    return this.dados.pedidos;
+    return this.dados.pedidos.map((p) => ({ ...p, ...resumoPagamento(p) }));
   }
 
   obter(id) {
@@ -204,6 +341,7 @@ export class Pedidos {
     const agora = new Date().toISOString();
     const montado = this.#montar(e, lead);
     const pedido = { id: randomUUID(), numero: this.dados.proximoNumero++, criadoEm: agora, ...montado, historico: [{ status: montado.status, em: agora }], atualizadoEm: agora };
+    this.#ajustarEstoque(null, pedido);
     this.dados.pedidos.unshift(pedido);
     await this.salvar();
     return pedido;
@@ -216,7 +354,9 @@ export class Pedidos {
     if (!lead && !montado.cliente) throw new ErroValidacao("Escolha o cliente do pedido");
     const agora = new Date().toISOString();
     if (montado.status !== pedido.status) pedido.historico = [...(pedido.historico || []), { status: montado.status, em: agora }];
+    const antes = { status: pedido.status, itens: pedido.itens };
     Object.assign(pedido, montado, { atualizadoEm: agora });
+    this.#ajustarEstoque(antes, pedido);
     await this.salvar();
     return pedido;
   }
@@ -228,7 +368,9 @@ export class Pedidos {
     if (!STATUS_PEDIDO.includes(status)) throw new ErroValidacao("Status do pedido inválido");
     if (pedido.status !== status) {
       const agora = new Date().toISOString();
+      const antes = { status: pedido.status, itens: pedido.itens };
       pedido.status = status;
+      this.#ajustarEstoque(antes, pedido);
       pedido.historico = [...(pedido.historico || []), { status, em: agora }];
       pedido.atualizadoEm = agora;
       await this.salvar();
@@ -237,9 +379,10 @@ export class Pedidos {
   }
 
   async excluir(id) {
-    const antes = this.dados.pedidos.length;
+    const pedido = this.obter(id);
+    if (!pedido) return false;
+    this.#ajustarEstoque(pedido, null); // devolve ao estoque o que a venda tinha tirado
     this.dados.pedidos = this.dados.pedidos.filter((p) => p.id !== id);
-    if (this.dados.pedidos.length === antes) return false;
     await this.salvar();
     return true;
   }
@@ -279,6 +422,19 @@ export class Pedidos {
   }
 }
 
+/** Situação do pagamento de um pedido (calculada, não guardada). */
+export function resumoPagamento(p, hoje = new Date().toISOString().slice(0, 10)) {
+  const parcelas = p.pagamentos || [];
+  const pago = centavos(parcelas.filter((x) => x.pagaEm).reduce((s, x) => s + x.valor, 0));
+  const aReceber = centavos(p.total - pago);
+  let situacaoPagamento = "Pendente";
+  if (p.status === "Cancelado") situacaoPagamento = "Cancelado";
+  else if (parcelas.length && parcelas.every((x) => x.pagaEm)) situacaoPagamento = "Pago";
+  else if (parcelas.some((x) => !x.pagaEm && x.vencimento < hoje)) situacaoPagamento = "Atrasado";
+  else if (pago > 0) situacaoPagamento = "Parcial";
+  return { pago, aReceber: p.status === "Cancelado" ? 0 : aReceber, situacaoPagamento };
+}
+
 function produtosDeExemplo() {
   const agora = new Date().toISOString();
   return [
@@ -291,8 +447,8 @@ function produtosDeExemplo() {
 function condicoesDeExemplo() {
   const agora = new Date().toISOString();
   return [
-    { id: randomUUID(), nome: "PIX à vista", parcelas: 1, ajustePercentual: -5, descricao: "5% de desconto", ativo: true, criadoEm: agora },
-    { id: randomUUID(), nome: "Cartão de crédito em 3x", parcelas: 3, ajustePercentual: 0, descricao: "Sem juros", ativo: true, criadoEm: agora },
-    { id: randomUUID(), nome: "Boleto 30/60/90", parcelas: 3, ajustePercentual: 3, descricao: "3% de acréscimo", ativo: true, criadoEm: agora },
+    { id: randomUUID(), nome: "PIX à vista", parcelas: 1, ajustePercentual: -5, primeiroVencimentoDias: 0, intervaloDias: 30, descricao: "5% de desconto", ativo: true, criadoEm: agora },
+    { id: randomUUID(), nome: "Cartão de crédito em 3x", parcelas: 3, ajustePercentual: 0, primeiroVencimentoDias: 30, intervaloDias: 30, descricao: "Sem juros", ativo: true, criadoEm: agora },
+    { id: randomUUID(), nome: "Boleto 30/60/90", parcelas: 3, ajustePercentual: 3, primeiroVencimentoDias: 30, intervaloDias: 30, descricao: "3% de acréscimo", ativo: true, criadoEm: agora },
   ];
 }

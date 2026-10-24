@@ -1740,7 +1740,15 @@
   });
 
   // ---------- Pedidos, produtos e condições de pagamento ----------
-  const pd = { pedidos: [], produtos: [], condicoes: [], status: [], aba: "pedidos", filtroStatus: "", busca: "" };
+  const pd = { pedidos: [], produtos: [], condicoes: [], vendedores: [], config: { empresa: {} }, status: [], aba: "pedidos", filtroStatus: "", filtroPagamento: "", busca: "" };
+  const STATUS_VENDA = ["Confirmado", "Em separação", "Enviado", "Entregue"];
+  const CLASSE_PAGAMENTO = { Pago: "pg-pago", Parcial: "pg-parcial", Atrasado: "pg-atrasado", Pendente: "pg-pendente", Cancelado: "pg-cancelado" };
+  /** Soma separando real e euro (um lead de Portugal gera pedido em €). */
+  function somaPorMoeda(lista, campo) {
+    const brl = lista.filter((p) => p.moeda !== "EUR").reduce((s, p) => s + (Number(p[campo]) || 0), 0);
+    const eur = lista.filter((p) => p.moeda === "EUR").reduce((s, p) => s + (Number(p[campo]) || 0), 0);
+    return [brl || !eur ? dinheiro(brl) : "", eur ? dinheiro(eur, "EUR") : ""].filter(Boolean).join(" · ");
+  }
   const CLASSE_STATUS = {
     "Orçamento": "st-orcamento", Confirmado: "st-confirmado", "Em separação": "st-separacao",
     Enviado: "st-enviado", Entregue: "st-entregue", Cancelado: "st-cancelado",
@@ -1763,8 +1771,11 @@
     $("#pd-lista-pedidos").hidden = pd.aba !== "pedidos";
     $("#pd-lista-produtos").hidden = pd.aba !== "produtos";
     $("#pd-lista-condicoes").hidden = pd.aba !== "condicoes";
-    $("#pd-novo").textContent = { pedidos: "+ Novo pedido", produtos: "+ Novo produto", condicoes: "+ Nova condição" }[pd.aba];
-    $("#pd-busca").placeholder = { pedidos: "Buscar pedido, cliente ou produto", produtos: "Buscar produto ou código", condicoes: "Buscar condição" }[pd.aba];
+    $("#pd-lista-vendedores").hidden = pd.aba !== "vendedores";
+    $("#pd-filtro-pagamento").hidden = pd.aba !== "pedidos";
+    $("#pd-novo").textContent = { pedidos: "+ Novo pedido", produtos: "+ Novo produto", condicoes: "+ Nova condição", vendedores: "+ Novo vendedor" }[pd.aba];
+    $("#pd-busca").placeholder = { pedidos: "Buscar pedido, cliente, produto ou vendedor", produtos: "Buscar produto ou código", condicoes: "Buscar condição", vendedores: "Buscar vendedor" }[pd.aba];
+    if (pd.aba === "vendedores") renderListaVendedores();
     if (pd.aba === "pedidos") renderListaPedidos();
     if (pd.aba === "produtos") renderListaProdutos();
     if (pd.aba === "condicoes") renderListaCondicoes();
@@ -1774,8 +1785,9 @@
     const termo = normalizar(pd.busca.trim());
     return pd.pedidos.filter((p) => {
       if (pd.filtroStatus && p.status !== pd.filtroStatus) return false;
+      if (pd.filtroPagamento && p.situacaoPagamento !== pd.filtroPagamento) return false;
       if (!termo) return true;
-      return normalizar([`#${p.numero}`, p.numero, p.cliente, p.condicao?.nome, ...p.itens.map((i) => i.descricao)].join(" ")).includes(termo);
+      return normalizar([`#${p.numero}`, p.numero, p.cliente, p.condicao?.nome, p.vendedor?.nome, ...p.itens.map((i) => i.descricao)].join(" ")).includes(termo);
     });
   }
 
@@ -1791,11 +1803,12 @@
     const lista = pedidosFiltrados();
     $("#pd-corpo").innerHTML = lista.map((p) => {
       const resumoItens = p.itens.map((i) => `${String(i.quantidade).replace(".", ",")} × ${i.descricao}`).join("\n");
-      const pagamento = p.condicao ? `${esc(p.condicao.nome)}${p.parcelas > 1 ? `<small>${p.parcelas}x de ${dinheiro(p.valorParcela, p.moeda)}</small>` : ""}` : `<span class="suave">—</span>`;
+      const pagamento = `<span class="pg-chip ${CLASSE_PAGAMENTO[p.situacaoPagamento] || ""}">${esc(p.situacaoPagamento || "")}</span>
+        <small>${p.condicao ? `${esc(p.condicao.nome)}${p.parcelas > 1 ? ` · ${p.parcelas}x` : ""}` : "sem condição"}${p.aReceber > 0 && p.situacaoPagamento !== "Pendente" ? ` · falta ${dinheiro(p.aReceber, p.moeda)}` : ""}</small>`;
       return `<tr data-pedido="${p.id}">
         <td><strong>#${p.numero}</strong></td>
         <td>${dataCurta(p.criadoEm)}</td>
-        <td>${p.leadId ? `<a href="#" data-abrir-lead="${p.leadId}">${esc(p.cliente)}</a>` : esc(p.cliente)}</td>
+        <td>${p.leadId ? `<a href="#" data-abrir-lead="${p.leadId}">${esc(p.cliente)}</a>` : esc(p.cliente)}${p.vendedor ? `<small>vendedor: ${esc(p.vendedor.nome)}</small>` : ""}</td>
         <td title="${esc(resumoItens)}">${p.itens.length} ${p.itens.length === 1 ? "item" : "itens"}<small>${esc(p.itens[0]?.descricao || "")}${p.itens.length > 1 ? "…" : ""}</small></td>
         <td>${pagamento}</td>
         <td class="num"><strong>${dinheiro(p.total, p.moeda)}</strong></td>
@@ -1818,12 +1831,38 @@
       <td><strong>${esc(p.nome)}</strong>${p.descricao ? `<small>${esc(p.descricao)}</small>` : ""}</td>
       <td>${esc(p.unidade)}</td>
       <td class="num"><strong>${dinheiro(p.preco)}</strong></td>
+      <td class="num">${p.controlarEstoque ? `<span class="estoque${p.estoque <= 0 ? " zerado" : p.estoque <= (p.estoqueMinimo || 0) ? " baixo" : ""}">${String(p.estoque).replace(".", ",")} ${esc(p.unidade)}</span>` : `<span class="suave">—</span>`}</td>
       <td><label class="interruptor mini"><input type="checkbox" data-ativar-produto="${p.id}" ${p.ativo ? "checked" : ""} /><span class="trilho"></span></label></td>
       <td class="col-acoes">
         <button class="icone-btn" data-editar-produto="${p.id}" title="Editar">${ICONE_EDITAR}</button>
         <button class="icone-btn del" data-excluir-produto="${p.id}" title="Excluir">${ICONE_LIXO}</button>
       </td></tr>`).join("");
     $("#pr-vazio").hidden = lista.length > 0;
+  }
+
+  function descreverPrazo(c) {
+    const primeiro = c.primeiroVencimentoDias ?? (c.parcelas > 1 ? 30 : 0);
+    const inicio = primeiro ? `1ª em ${primeiro} dias` : "1ª no dia do pedido";
+    return c.parcelas > 1 ? `${inicio}, depois a cada ${c.intervaloDias || 30} dias` : primeiro ? `em ${primeiro} dias` : "à vista";
+  }
+
+  function renderListaVendedores() {
+    const termo = normalizar(pd.busca.trim());
+    const lista = pd.vendedores.filter((v) => !termo || normalizar(v.nome).includes(termo));
+    $("#vd-corpo").innerHTML = lista.map((v) => {
+      const vendas = pd.pedidos.filter((p) => p.vendedor?.id === v.id && STATUS_VENDA.includes(p.status));
+      return `<tr class="${v.ativo ? "" : "inativo"}">
+        <td><strong>${esc(v.nome)}</strong></td>
+        <td class="num">${String(v.comissaoPercentual).replace(".", ",")}%</td>
+        <td class="num">${vendas.length} · ${somaPorMoeda(vendas, "total")}</td>
+        <td class="num"><strong>${somaPorMoeda(vendas, "comissao")}</strong></td>
+        <td><label class="interruptor mini"><input type="checkbox" data-ativar-vendedor="${v.id}" ${v.ativo ? "checked" : ""} /><span class="trilho"></span></label></td>
+        <td class="col-acoes">
+          <button class="icone-btn" data-editar-vendedor="${v.id}" title="Editar">${ICONE_EDITAR}</button>
+          <button class="icone-btn del" data-excluir-vendedor="${v.id}" title="Excluir">${ICONE_LIXO}</button>
+        </td></tr>`;
+    }).join("");
+    $("#vd-vazio").hidden = lista.length > 0;
   }
 
   const descreverAjuste = (a) => (!a ? "—" : a < 0 ? `${String(-a).replace(".", ",")}% de desconto` : `${String(a).replace(".", ",")}% de acréscimo`);
@@ -1834,6 +1873,7 @@
     $("#cp-corpo").innerHTML = lista.map((c) => `<tr class="${c.ativo ? "" : "inativo"}">
       <td><strong>${esc(c.nome)}</strong></td>
       <td>${c.parcelas}x</td>
+      <td>${descreverPrazo(c)}</td>
       <td class="${c.ajustePercentual < 0 ? "ajuste-desc" : c.ajustePercentual > 0 ? "ajuste-acr" : ""}">${descreverAjuste(c.ajustePercentual)}</td>
       <td>${esc(c.descricao || "")}</td>
       <td><label class="interruptor mini"><input type="checkbox" data-ativar-condicao="${c.id}" ${c.ativo ? "checked" : ""} /><span class="trilho"></span></label></td>
@@ -1854,7 +1894,11 @@
     pd.busca = e.target.value;
     renderPedidos();
   });
-  $("#pd-novo").addEventListener("click", () => (pd.aba === "pedidos" ? abrirPedido() : pd.aba === "produtos" ? abrirProduto() : abrirCondicao()));
+  $("#pd-novo").addEventListener("click", () => ({ pedidos: abrirPedido, produtos: abrirProduto, condicoes: abrirCondicao, vendedores: abrirVendedor })[pd.aba]());
+  $("#pd-filtro-pagamento").addEventListener("change", (e) => {
+    pd.filtroPagamento = e.target.value;
+    renderListaPedidos();
+  });
   $("#pd-status").addEventListener("click", (e) => {
     const b = e.target.closest("[data-pd-status]");
     if (!b) return;
@@ -1862,10 +1906,17 @@
     renderListaPedidos();
   });
 
+  // Venda fechada move o lead para "Ganho" (no servidor); avisa para a pessoa não estranhar o Kanban.
+  function avisoLeadGanho(pedido, statusNovo) {
+    const lead = pedido?.leadId && estado.leads.find((l) => l.id === pedido.leadId);
+    return pd.config.moverLeadParaGanho && STATUS_VENDA.includes(statusNovo) && lead && lead.etapa !== "Ganho" ? ` — ${lead.nome} foi para “Ganho”` : "";
+  }
+
   async function mudarStatusPedido(id, status) {
     try {
+      const aviso = avisoLeadGanho(pd.pedidos.find((x) => x.id === id), status);
       await api("POST", `/api/pedidos/${id}/status`, { status });
-      toast(`Pedido agora está “${status}”`);
+      toast(`Pedido agora está “${status}”${aviso}`);
       await carregarPedidos();
     } catch (err) {
       toast(err.message, true);
@@ -1911,6 +1962,11 @@
       return excluirRegistro(`/api/produtos/${p.id}`, `Excluir o produto “${p.nome}”? Os pedidos já feitos não mudam.`, "Produto excluído");
     }
     if ((b = t("[data-editar-condicao]"))) return abrirCondicao(b.dataset.editarCondicao);
+    if ((b = t("[data-editar-vendedor]"))) return abrirVendedor(b.dataset.editarVendedor);
+    if ((b = t("[data-excluir-vendedor]"))) {
+      const v = pd.vendedores.find((x) => x.id === b.dataset.excluirVendedor);
+      return excluirRegistro(`/api/vendedores/${v.id}`, `Excluir o vendedor “${v.nome}”? Os pedidos já feitos continuam com o nome dele.`, "Vendedor excluído");
+    }
     if ((b = t("[data-excluir-condicao]"))) {
       const c = pd.condicoes.find((x) => x.id === b.dataset.excluirCondicao);
       return excluirRegistro(`/api/condicoes/${c.id}`, `Excluir a condição “${c.nome}”? Os pedidos já feitos não mudam.`, "Condição excluída");
@@ -1919,7 +1975,7 @@
   $("#painel-pedidos").addEventListener("change", async (e) => {
     const d = e.target.dataset;
     if (d.mudarStatus) return mudarStatusPedido(d.mudarStatus, e.target.value);
-    const [rota, id] = d.ativarProduto ? ["produtos", d.ativarProduto] : d.ativarCondicao ? ["condicoes", d.ativarCondicao] : [];
+    const [rota, id] = d.ativarProduto ? ["produtos", d.ativarProduto] : d.ativarCondicao ? ["condicoes", d.ativarCondicao] : d.ativarVendedor ? ["vendedores", d.ativarVendedor] : [];
     if (!rota) return;
     try {
       await api("PATCH", `/api/${rota}/${id}`, { ativo: e.target.checked });
@@ -1944,7 +2000,7 @@
 
   function opcoesProduto(selecionado) {
     const ativos = pd.produtos.filter((p) => p.ativo || p.id === selecionado);
-    return `<option value="">✎ Item avulso (digitar)</option>` + ativos.map((p) => `<option value="${p.id}"${p.id === selecionado ? " selected" : ""}>${esc(p.nome)}${p.codigo ? ` (${esc(p.codigo)})` : ""} — ${dinheiro(p.preco)}</option>`).join("");
+    return `<option value="">✎ Item avulso (digitar)</option>` + ativos.map((p) => `<option value="${p.id}"${p.id === selecionado ? " selected" : ""}>${esc(p.nome)}${p.codigo ? ` (${esc(p.codigo)})` : ""} — ${dinheiro(p.preco)}${p.controlarEstoque ? ` · estoque ${String(p.estoque).replace(".", ",")}` : ""}</option>`).join("");
   }
 
   function renderItensPedido() {
@@ -1982,8 +2038,65 @@
       (ajuste ? linha(`${ajuste < 0 ? "Desconto" : "Acréscimo"} — ${esc(c.nome)}`, `${ajuste < 0 ? "−" : "+"} ${dinheiro(Math.abs(ajuste), moeda)}`, ajuste < 0 ? "ajuste-desc" : "ajuste-acr") : "") +
       (desconto ? linha("Desconto", `− ${dinheiro(desconto, moeda)}`, "ajuste-desc") : "") +
       (frete ? linha("Frete", `+ ${dinheiro(frete, moeda)}`) : "") +
-      linha("Total", `${dinheiro(total, moeda)}${parcelas > 1 ? `<small>${parcelas}x de ${dinheiro(centavos(total / parcelas), moeda)}</small>` : ""}`, "total-final");
+      linha("Total", `${dinheiro(total, moeda)}${parcelas > 1 ? `<small>${parcelas}x de ${dinheiro(centavos(total / parcelas), moeda)}</small>` : ""}`, "total-final") +
+      (vendedorEscolhido() ? linha(`Comissão de ${esc(vendedorEscolhido().nome)} (${String(vendedorEscolhido().comissaoPercentual).replace(".", ",")}%)`, dinheiro(centavos((total * vendedorEscolhido().comissaoPercentual) / 100), moeda), "linha-comissao") : "");
+    renderParcelasPedido(total, c, moeda);
   }
+
+  const vendedorEscolhido = () => pd.vendedores.find((v) => v.id === formPedido.vendedorId.value) || (pedidoEditado?.vendedor?.id === formPedido.vendedorId.value ? pedidoEditado.vendedor : null);
+
+  // Mesma regra do servidor (pedidos.mjs → #parcelas): última parcela leva os centavos que sobram.
+  function previaParcelas(total, condicao) {
+    const n = condicao?.parcelas || 1;
+    const valores = Array.from({ length: n }, (_, i) => (i < n - 1 ? Math.floor((total / n) * 100) / 100 : 0));
+    valores[n - 1] = centavos(total - valores.slice(0, -1).reduce((s, v) => s + v, 0));
+    const primeiro = condicao?.primeiroVencimentoDias ?? (n > 1 ? 30 : 0);
+    const intervalo = condicao?.intervaloDias || 30;
+    const base = new Date(pedidoEditado?.criadoEm || Date.now());
+    return valores.map((valor, i) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + primeiro + i * intervalo);
+      return { numero: i + 1, valor, vencimento: d.toISOString().slice(0, 10), pagaEm: "" };
+    });
+  }
+
+  function renderParcelasPedido(total, condicao, moeda) {
+    const previa = previaParcelas(total, condicao);
+    const salvas = pedidoEditado?.pagamentos || [];
+    const mesmas = salvas.length === previa.length && salvas.every((p, i) => p.valor === previa[i].valor);
+    const temPaga = salvas.some((p) => p.pagaEm);
+    const hoje = new Date().toISOString().slice(0, 10);
+    const lista = mesmas ? salvas : previa;
+    const interativa = mesmas && pedidoEditado;
+    const dataBr = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("pt-BR");
+    $("#pedido-parcelas").innerHTML = `<h4>Pagamento ${interativa ? "" : "<small>(as datas são confirmadas ao salvar)</small>"}</h4>
+      ${!mesmas && temPaga ? `<p class="diag-aviso">Este pedido já tem parcela paga. Para mudar valores ou a condição, desmarque o pagamento primeiro.</p>` : ""}
+      <div class="parcelas">${lista.map((p) => `<div class="parcela${p.pagaEm ? " paga" : !p.pagaEm && p.vencimento < hoje ? " vencida" : ""}">
+        <span class="parcela-num">${p.numero}/${lista.length}</span>
+        ${interativa ? `<input type="date" value="${p.vencimento}" data-parcela-venc="${p.numero}" aria-label="Vencimento da parcela ${p.numero}" ${p.pagaEm ? "disabled" : ""} />` : `<span>${dataBr(p.vencimento)}</span>`}
+        <strong>${dinheiro(p.valor, moeda)}</strong>
+        ${interativa ? `<label class="check"><input type="checkbox" data-parcela-paga="${p.numero}" ${p.pagaEm ? "checked" : ""} /> ${p.pagaEm ? `paga em ${new Date(p.pagaEm).toLocaleDateString("pt-BR")}` : "paga"}</label>` : ""}
+      </div>`).join("")}</div>`;
+  }
+
+  // Marcar parcela como paga ou mudar o vencimento: salva na hora (não espera o "Salvar pedido").
+  $("#pedido-parcelas").addEventListener("change", async (e) => {
+    const numeroPaga = e.target.dataset.parcelaPaga;
+    const numeroVenc = e.target.dataset.parcelaVenc;
+    if (!pedidoEditado || (!numeroPaga && !numeroVenc)) return;
+    const corpo = numeroPaga ? { paga: e.target.checked } : { vencimento: e.target.value };
+    try {
+      const atualizado = await api("PATCH", `/api/pedidos/${pedidoEditado.id}/pagamentos/${numeroPaga || numeroVenc}`, corpo);
+      pedidoEditado = atualizado;
+      const i = pd.pedidos.findIndex((x) => x.id === atualizado.id);
+      if (i >= 0) pd.pedidos[i] = atualizado;
+      renderTotaisPedido();
+      if (numeroPaga) toast(e.target.checked ? `Parcela ${numeroPaga} paga — situação: ${atualizado.situacaoPagamento}` : `Parcela ${numeroPaga} desmarcada`);
+    } catch (err) {
+      toast(err.message, true);
+      renderTotaisPedido();
+    }
+  });
 
   function abrirPedido(id = null, { leadId = "" } = {}) {
     const p = id ? pd.pedidos.find((x) => x.id === id) : null;
@@ -1992,6 +2105,8 @@
     $("#pedido-titulo").textContent = p ? `Pedido #${p.numero}` : "Novo pedido";
     $("#pedido-excluir").hidden = !p;
     $("#pedido-whatsapp").hidden = !(p && p.leadId);
+    $("#pedido-imprimir").hidden = !p;
+    if (p) $("#pedido-imprimir").href = `/pedidos/${p.id}/imprimir`;
     const leadEscolhido = p ? p.leadId : leadId;
     const leads = [...estado.leads].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
     formPedido.leadId.innerHTML = `<option value="">Selecione o cliente…</option>` +
@@ -2004,6 +2119,9 @@
     formPedido.condicaoId.innerHTML = `<option value="">Sem condição definida</option>` +
       [...conds, ...(condAntiga ? [condAntiga] : [])].map((c) => `<option value="${c.id}"${c.id === p?.condicao?.id ? " selected" : ""}>${esc(c.nome)}${c.parcelas > 1 ? ` · ${c.parcelas}x` : ""}${c.ajustePercentual ? ` · ${c.ajustePercentual > 0 ? "+" : ""}${String(c.ajustePercentual).replace(".", ",")}%` : ""}</option>`).join("");
     formPedido.status.innerHTML = pd.status.map((st) => `<option${st === (p?.status || "Orçamento") ? " selected" : ""}>${esc(st)}</option>`).join("");
+    const vends = pd.vendedores.filter((v) => v.ativo || v.id === p?.vendedor?.id);
+    const vendAntigo = p?.vendedor && !pd.vendedores.some((v) => v.id === p.vendedor.id) ? p.vendedor : null;
+    formPedido.vendedorId.innerHTML = `<option value="">Sem vendedor</option>` + [...vends, ...(vendAntigo ? [vendAntigo] : [])].map((v) => `<option value="${v.id}"${v.id === p?.vendedor?.id ? " selected" : ""}>${esc(v.nome)} (${String(v.comissaoPercentual).replace(".", ",")}%)</option>`).join("");
     formPedido.desconto.value = p?.desconto || "";
     formPedido.frete.value = p?.frete || "";
     formPedido.observacoes.value = p?.observacoes || "";
@@ -2021,6 +2139,7 @@
     renderItensPedido(); // a moeda acompanha o país do cliente
   });
   formPedido.condicaoId.addEventListener("change", renderTotaisPedido);
+  formPedido.vendedorId.addEventListener("change", renderTotaisPedido);
   formPedido.desconto.addEventListener("input", renderTotaisPedido);
   formPedido.frete.addEventListener("input", renderTotaisPedido);
   $("#pedido-add-item").addEventListener("click", () => {
@@ -2062,6 +2181,7 @@
       clienteNome: avulso ? formPedido.clienteNome.value.trim() : "",
       itens: itensPedido.map((i) => ({ produtoId: i.produtoId, descricao: i.descricao, quantidade: Number(i.quantidade), precoUnitario: Number(i.precoUnitario) })),
       condicaoId: formPedido.condicaoId.value,
+      vendedorId: formPedido.vendedorId.value,
       status: formPedido.status.value,
       desconto: Number(formPedido.desconto.value) || 0,
       frete: Number(formPedido.frete.value) || 0,
@@ -2072,7 +2192,8 @@
     try {
       const salvo = pedidoEditado ? await api("PATCH", `/api/pedidos/${pedidoEditado.id}`, corpo) : await api("POST", "/api/pedidos", corpo);
       modalPedido.close();
-      toast(pedidoEditado ? `Pedido #${salvo.numero} atualizado` : `Pedido #${salvo.numero} criado — ${dinheiro(salvo.total, salvo.moeda)}`);
+      const aviso = avisoLeadGanho({ leadId: corpo.leadId }, corpo.status);
+      toast((pedidoEditado ? `Pedido #${salvo.numero} atualizado` : `Pedido #${salvo.numero} criado — ${dinheiro(salvo.total, salvo.moeda)}`) + aviso);
       await carregarPedidos();
     } catch (err) {
       toast(err.message, true);
@@ -2087,12 +2208,12 @@
   $("#pedido-whatsapp").addEventListener("click", () => enviarPedidoWhatsApp(pedidoEditado.id));
 
   // ---- produto e condição de pagamento ----
-  function ligarCadastro({ modal, form, titulo, excluir, rota, nomeItem, colecao, preencher, ler }) {
+  function ligarCadastro({ modal, form, titulo, excluir, rota, nomeItem, colecao, preencher, ler, genero = "o" }) {
     let editado = null;
     const abrir = (id = null) => {
       editado = id ? pd[colecao].find((x) => x.id === id) : null;
       form.reset();
-      $(titulo).textContent = editado ? `Editar ${nomeItem}` : `Nov${nomeItem === "produto" ? "o" : "a"} ${nomeItem}`;
+      $(titulo).textContent = editado ? `Editar ${nomeItem}` : `Nov${genero} ${nomeItem}`;
       $(excluir).hidden = !editado;
       preencher(editado);
       modal.showModal();
@@ -2103,7 +2224,7 @@
       try {
         await (editado ? api("PATCH", `/api/${rota}/${editado.id}`, ler()) : api("POST", `/api/${rota}`, ler()));
         modal.close();
-        toast(`${nomeItem[0].toUpperCase() + nomeItem.slice(1)} salv${nomeItem === "produto" ? "o" : "a"}`);
+        toast(`${nomeItem[0].toUpperCase() + nomeItem.slice(1)} salv${genero}`);
         await carregarPedidos();
       } catch (err) {
         toast(err.message, true);
@@ -2124,23 +2245,70 @@
       formProduto.preco.value = p ? p.preco : "";
       formProduto.descricao.value = p?.descricao || "";
       formProduto.ativo.checked = p ? p.ativo : true;
+      formProduto.controlarEstoque.checked = !!p?.controlarEstoque;
+      formProduto.estoque.value = p?.estoque ?? 0;
+      formProduto.estoqueMinimo.value = p?.estoqueMinimo ?? 0;
+      $$(".campo-estoque", formProduto).forEach((c) => (c.hidden = !formProduto.controlarEstoque.checked));
     },
-    ler: () => ({ nome: formProduto.nome.value, codigo: formProduto.codigo.value, unidade: formProduto.unidade.value, preco: formProduto.preco.value === "" ? 0 : Number(formProduto.preco.value), descricao: formProduto.descricao.value, ativo: formProduto.ativo.checked }),
+    ler: () => ({
+      nome: formProduto.nome.value, codigo: formProduto.codigo.value, unidade: formProduto.unidade.value,
+      preco: formProduto.preco.value === "" ? 0 : Number(formProduto.preco.value), descricao: formProduto.descricao.value, ativo: formProduto.ativo.checked,
+      controlarEstoque: formProduto.controlarEstoque.checked, estoque: Number(formProduto.estoque.value) || 0, estoqueMinimo: Number(formProduto.estoqueMinimo.value) || 0,
+    }),
   });
   const formCondicao = $("#form-condicao");
   const abrirCondicao = ligarCadastro({
-    modal: $("#modal-condicao"), form: formCondicao, titulo: "#condicao-titulo", excluir: "#condicao-excluir", rota: "condicoes", nomeItem: "condição de pagamento", colecao: "condicoes",
+    modal: $("#modal-condicao"), form: formCondicao, titulo: "#condicao-titulo", excluir: "#condicao-excluir", rota: "condicoes", nomeItem: "condição de pagamento", colecao: "condicoes", genero: "a",
     preencher: (c) => {
       formCondicao.nome.value = c?.nome || "";
       formCondicao.parcelas.value = c?.parcelas || 1;
       formCondicao.ajustePercentual.value = c?.ajustePercentual || 0;
       formCondicao.descricao.value = c?.descricao || "";
       formCondicao.ativo.checked = c ? c.ativo : true;
+      formCondicao.primeiroVencimentoDias.value = c?.primeiroVencimentoDias ?? (c && c.parcelas > 1 ? 30 : 0);
+      formCondicao.intervaloDias.value = c?.intervaloDias || 30;
     },
-    ler: () => ({ nome: formCondicao.nome.value, parcelas: Number(formCondicao.parcelas.value), ajustePercentual: Number(formCondicao.ajustePercentual.value) || 0, descricao: formCondicao.descricao.value, ativo: formCondicao.ativo.checked }),
+    ler: () => ({
+      nome: formCondicao.nome.value, parcelas: Number(formCondicao.parcelas.value), ajustePercentual: Number(formCondicao.ajustePercentual.value) || 0,
+      descricao: formCondicao.descricao.value, ativo: formCondicao.ativo.checked,
+      primeiroVencimentoDias: Number(formCondicao.primeiroVencimentoDias.value) || 0, intervaloDias: Number(formCondicao.intervaloDias.value) || 30,
+    }),
+  });
+  formProduto.controlarEstoque.addEventListener("change", (e) => $$(".campo-estoque", formProduto).forEach((c) => (c.hidden = !e.target.checked)));
+
+  const formVendedor = $("#form-vendedor");
+  const abrirVendedor = ligarCadastro({
+    modal: $("#modal-vendedor"), form: formVendedor, titulo: "#vendedor-titulo", excluir: "#vendedor-excluir", rota: "vendedores", nomeItem: "vendedor", colecao: "vendedores",
+    preencher: (v) => {
+      formVendedor.nome.value = v?.nome || "";
+      formVendedor.comissaoPercentual.value = v?.comissaoPercentual ?? 0;
+      formVendedor.ativo.checked = v ? v.ativo : true;
+    },
+    ler: () => ({ nome: formVendedor.nome.value, comissaoPercentual: Number(formVendedor.comissaoPercentual.value) || 0, ativo: formVendedor.ativo.checked }),
   });
 
-  for (const dlg of [modalPedido, $("#modal-produto"), $("#modal-condicao")]) {
+  // ---- dados da empresa (pedido impresso) e regra do lead "Ganho" ----
+  const modalPdConfig = $("#modal-pd-config");
+  const formPdConfig = $("#form-pd-config");
+  $("#pd-config").addEventListener("click", () => {
+    const emp = pd.config.empresa || {};
+    for (const k of ["nome", "documento", "telefone", "email", "endereco"]) formPdConfig[k].value = emp[k] || "";
+    formPdConfig.moverLeadParaGanho.checked = pd.config.moverLeadParaGanho !== false;
+    modalPdConfig.showModal();
+  });
+  formPdConfig.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const empresa = Object.fromEntries(["nome", "documento", "telefone", "email", "endereco"].map((k) => [k, formPdConfig[k].value]));
+      pd.config = await api("PATCH", "/api/pedidos-config", { empresa, moverLeadParaGanho: formPdConfig.moverLeadParaGanho.checked });
+      modalPdConfig.close();
+      toast("Dados da empresa salvos");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  for (const dlg of [modalPedido, $("#modal-produto"), $("#modal-condicao"), $("#modal-vendedor"), modalPdConfig]) {
     $$("[data-fechar]", dlg).forEach((b) => b.addEventListener("click", () => dlg.close()));
     dlg.addEventListener("click", (e) => e.target === dlg && dlg.close());
   }

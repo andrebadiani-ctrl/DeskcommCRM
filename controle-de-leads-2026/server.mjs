@@ -12,7 +12,8 @@ import { Conversas, previa } from "./conversas.mjs";
 import { ErroValidacao, Store, chaveTelefone } from "./store.mjs";
 import { Followups } from "./followups.mjs";
 import { LIMITE_IMPORTACAO, normalizarLinha } from "./importacao.mjs";
-import { Pedidos, STATUS_PEDIDO } from "./pedidos.mjs";
+import { paginaDoPedido } from "./impressao.mjs";
+import { Pedidos, STATUS_PEDIDO, STATUS_VENDA, resumoPagamento } from "./pedidos.mjs";
 import { Tarefas } from "./tarefas.mjs";
 import { WhatsApp } from "./whatsapp.mjs";
 import { WhatsAppSimulado } from "./whatsapp-simulado.mjs";
@@ -300,12 +301,22 @@ const naoEncontrado = (res, o) => res.status(404).json({ error: { message: `${o}
 const avisarPedidos = () => transmitir("pedidos", {});
 
 app.get("/api/pedidos", (_req, res) => {
-  res.json({ data: { pedidos: pedidos.listar(), produtos: pedidos.dados.produtos, condicoes: pedidos.dados.condicoes, status: STATUS_PEDIDO } });
+  res.json({
+    data: {
+      pedidos: pedidos.listar(),
+      produtos: pedidos.dados.produtos,
+      condicoes: pedidos.dados.condicoes,
+      vendedores: pedidos.dados.vendedores,
+      config: pedidos.dados.config,
+      status: STATUS_PEDIDO,
+    },
+  });
 });
 
 for (const [rota, criar, atualizar, excluir, nome] of [
   ["produtos", "criarProduto", "atualizarProduto", "excluirProduto", "Produto"],
   ["condicoes", "criarCondicao", "atualizarCondicao", "excluirCondicao", "Condição de pagamento"],
+  ["vendedores", "criarVendedor", "atualizarVendedor", "excluirVendedor", "Vendedor"],
 ]) {
   app.post(`/api/${rota}`, assincrono(async (req, res) => {
     const item = await pedidos[criar](req.body);
@@ -334,24 +345,58 @@ function leadDoPedido(body, atual) {
   return lead;
 }
 
+app.patch("/api/pedidos-config", assincrono(async (req, res) => {
+  const config = await pedidos.atualizarConfig(req.body);
+  avisarPedidos();
+  res.json({ data: config });
+}));
+
+/** Venda fechada (pedido confirmado em diante): o lead vai para "Ganho" no Kanban. */
+async function ganharLead(pedido) {
+  if (!pedidos.dados.config.moverLeadParaGanho || !STATUS_VENDA.includes(pedido.status) || !pedido.leadId) return;
+  const lead = store.obter(pedido.leadId);
+  if (!lead || lead.etapa === "Ganho") return;
+  await store.atualizar(lead.id, { etapa: "Ganho" });
+  transmitir("leads", { motivo: "atualizado", id: lead.id });
+}
+const comResumo = (p) => ({ ...p, ...resumoPagamento(p) });
+
 app.post("/api/pedidos", assincrono(async (req, res) => {
   const pedido = await pedidos.criar(req.body, leadDoPedido(req.body));
+  await ganharLead(pedido);
   avisarPedidos();
-  res.status(201).json({ data: pedido });
+  res.status(201).json({ data: comResumo(pedido) });
 }));
 app.patch("/api/pedidos/:id", assincrono(async (req, res) => {
   const atual = pedidos.obter(req.params.id);
   if (!atual) return naoEncontrado(res, "Pedido");
   const pedido = await pedidos.atualizar(req.params.id, req.body, leadDoPedido(req.body, atual));
+  await ganharLead(pedido);
   avisarPedidos();
-  res.json({ data: pedido });
+  res.json({ data: comResumo(pedido) });
 }));
 app.post("/api/pedidos/:id/status", assincrono(async (req, res) => {
   const pedido = await pedidos.mudarStatus(req.params.id, req.body?.status);
   if (!pedido) return naoEncontrado(res, "Pedido");
+  await ganharLead(pedido);
   avisarPedidos();
-  res.json({ data: pedido });
+  res.json({ data: comResumo(pedido) });
 }));
+app.patch("/api/pedidos/:id/pagamentos/:numero", assincrono(async (req, res) => {
+  const pedido = await pedidos.atualizarParcela(req.params.id, req.params.numero, req.body || {});
+  if (!pedido) return res.status(404).json({ error: { message: "Parcela não encontrada" } });
+  avisarPedidos();
+  res.json({ data: comResumo(pedido) });
+}));
+
+// Pedido em página própria, pronta para imprimir ou "Salvar como PDF" no navegador.
+app.get("/pedidos/:id/imprimir", (req, res) => {
+  const pedido = pedidos.obter(req.params.id);
+  if (!pedido) return res.status(404).send("Pedido não encontrado");
+  res.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:");
+  res.type("html").send(paginaDoPedido(pedido, pedido.leadId ? store.obter(pedido.leadId) : null, pedidos.dados.config.empresa));
+});
+
 app.delete("/api/pedidos/:id", assincrono(async (req, res) => {
   if (!(await pedidos.excluir(req.params.id))) return naoEncontrado(res, "Pedido");
   avisarPedidos();

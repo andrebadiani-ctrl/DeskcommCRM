@@ -588,6 +588,32 @@ kbd { font: inherit; font-size: 0.78rem; font-weight: 700; background: #fff; bor
 .lembrete small { color: var(--texto-suave); }
 .lembrete-acoes { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 
+/* ---------- pagamento, estoque e comissão ---------- */
+.pg-chip { display: inline-block; font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px; background: #e5e7eb; color: #374151; }
+.pg-pago { background: var(--verde-200); color: var(--verde-900); }
+.pg-parcial { background: #e0f2fe; color: #075985; }
+.pg-atrasado { background: #ffedd5; color: #c2410c; }
+.pg-pendente { background: #f1f5f9; color: #475569; }
+.pg-cancelado { background: #fee2e2; color: #991b1b; }
+.estoque { font-weight: 700; color: var(--verde-800); }
+.estoque.baixo { color: #b45309; }
+.estoque.zerado { color: var(--vermelho); }
+.estoque.baixo::after, .estoque.zerado::after { content: " ⚠"; }
+.linha-comissao { font-size: 0.82rem; color: var(--texto-suave); border-top: 1px dashed var(--borda); padding-top: 6px; }
+.parcelas-pedido { margin-top: 18px; }
+.parcelas-pedido h4 { margin: 0 0 8px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--texto-suave); }
+.parcelas-pedido h4 small { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.parcelas { display: flex; flex-direction: column; gap: 6px; }
+.parcela { display: grid; grid-template-columns: 52px 1fr auto auto; gap: 12px; align-items: center; padding: 8px 12px; border: 1px solid var(--borda); border-radius: 10px; background: #fff; font-size: 0.86rem; }
+.parcela input[type="date"] { width: auto; padding: 5px 8px; }
+.parcela .check { margin: 0; white-space: nowrap; }
+.parcela-num { font-weight: 800; color: var(--verde-700); }
+.parcela.paga { background: var(--verde-50); border-color: var(--verde-300); }
+.parcela.vencida { background: #fff7ed; border-color: #fdba74; }
+.parcela.vencida .parcela-num::after { content: " ⚠"; color: #c2410c; }
+#pd-filtro-pagamento { width: auto; border-radius: 999px; }
+a.btn { text-decoration: none; }
+
 /* ---------- toasts ---------- */
 .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
 .toast { background: var(--verde-900); color: #fff; padding: 12px 16px; border-radius: 12px; font-size: 0.86rem; box-shadow: 0 8px 24px rgba(6, 35, 26, 0.3); animation: aparecer 0.2s ease-out; max-width: 340px; border-left: 4px solid var(--verde-400); }
@@ -647,6 +673,9 @@ kbd { font: inherit; font-size: 0.78rem; font-weight: 700; background: #fff; bor
   .cv-fila { width: 100%; justify-content: space-between; }
   .imp-final { grid-template-columns: 1fr; }
   .topo-tarefas { width: 34px; height: 34px; }
+  .parcela { grid-template-columns: 44px 1fr auto; }
+  .parcela .check { grid-column: 1 / -1; }
+  #pd-filtro-pagamento { flex: 1; }
   .nova-tarefa-linha { flex-wrap: wrap; }
   .nova-tarefa-linha select, .nova-tarefa-linha input { flex-basis: 100%; }
   .lembretes { left: 14px; right: 14px; max-width: none; }
