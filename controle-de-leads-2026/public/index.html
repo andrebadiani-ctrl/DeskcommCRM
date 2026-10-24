@@ -145,11 +145,16 @@
             <div class="cv-mensagens" id="cv-mensagens"></div>
             <div class="cv-compor">
               <div class="atalhos" id="cv-atalhos"></div>
+              <div class="anexo-pendente" id="cv-anexo" hidden></div>
               <div class="enviar">
                 <div class="campo-com-sugestoes">
                   <textarea id="cv-texto" rows="2" placeholder="Escreva uma mensagem… (digite / para respostas rápidas)" maxlength="4000"></textarea>
                   <div class="sugestoes" id="cv-sugestoes" role="listbox" hidden></div>
                 </div>
+                <label class="icone-btn anexar" title="Anexar foto, vídeo, áudio ou documento">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></svg>
+                  <input type="file" id="cv-arquivo" hidden />
+                </label>
                 <button type="button" class="btn btn-primario" id="cv-enviar">Enviar</button>
               </div>
               <p class="dica" id="cv-aviso"></p>

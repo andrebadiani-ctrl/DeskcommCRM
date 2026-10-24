@@ -181,6 +181,17 @@ export function chaveTelefone(t) {
   return d;
 }
 
+/**
+ * Mensagem como fica no histórico do lead. A mídia leva só a descrição; o arquivo e as chaves
+ * para baixá-lo moram na conversa (conversas.mjs) e a tela busca por /api/midia/:id.
+ */
+export function paraHistoricoDoLead({ id, direcao, texto, em, origem, midia }) {
+  const m = { id: id || "", direcao, texto: texto || "", em };
+  if (origem) m.origem = origem;
+  if (midia) m.midia = { tipo: midia.tipo, mimetype: midia.mimetype, nome: midia.nome || "", tamanho: midia.tamanho || 0, segundos: midia.segundos || 0, ptt: !!midia.ptt };
+  return m;
+}
+
 export class Store extends EventEmitter {
   constructor(dir) {
     super();
@@ -288,9 +299,10 @@ export class Store extends EventEmitter {
     return lead;
   }
 
-  async registrarMensagem(id, msg) {
+  async registrarMensagem(id, msgOriginal) {
     const lead = this.obter(id);
     if (!lead) return undefined;
+    const msg = paraHistoricoDoLead(msgOriginal);
     // A mesma mensagem pode chegar duas vezes (o envio e o eco do WhatsApp): o id desduplica.
     const existente = msg.id && (lead.mensagens || []).find((m) => m.id === msg.id);
     if (existente) {
@@ -311,7 +323,7 @@ export class Store extends EventEmitter {
     const lead = this.obter(id);
     if (!lead) return undefined;
     const ids = new Set((lead.mensagens || []).map((m) => m.id).filter(Boolean));
-    const novas = mensagens.filter((m) => !m.id || !ids.has(m.id)).map(({ id: mid, direcao, texto, em }) => ({ id: mid, direcao, texto, em }));
+    const novas = mensagens.filter((m) => !m.id || !ids.has(m.id)).map(paraHistoricoDoLead);
     lead.mensagens = [...(lead.mensagens || []), ...novas].sort((a, b) => a.em.localeCompare(b.em)).slice(-LIMITE_MENSAGENS);
     await this.salvar();
     return lead;

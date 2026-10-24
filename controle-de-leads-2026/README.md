@@ -36,6 +36,15 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
     esconde o número do contato).
   - Conversa que já é lead mostra a etapa do funil — dá para mudar a etapa ali mesmo, e o Kanban
     acompanha. No lead, o link *Abrir em Conversas* leva direto ao chat.
+  - **Fotos, vídeos, áudios (inclusive mensagens de voz), documentos e figurinhas** abrem dentro da
+    conversa e no histórico do lead: foto ampliável, player de vídeo e de áudio, documento com
+    *Abrir* e *Baixar*. O arquivo é baixado do WhatsApp na primeira vez que alguém abre e fica
+    guardado em `data/midia/` (abre na hora das próximas vezes).
+  - **Enviar anexos:** botão 📎 (ou arraste o arquivo para o chat), com legenda opcional — até 64 MB.
+    JPG/PNG/WEBP vão como foto, MP4 como vídeo, OGG/MP3/M4A como áudio; o resto vai como documento.
+  - Por segurança, só foto, vídeo, áudio e PDF abrem no navegador; qualquer outro arquivo é baixado.
+  - Mídia antiga pode ter expirado no WhatsApp: com o celular conectado ele reenvia; se não der,
+    aparece "Não foi possível abrir este arquivo — tentar de novo".
   - Grupos, status e canais não entram. Mensagens que você manda pelo celular também aparecem.
   - A criação automática de lead para todo número novo vem **desligada** (ligue em *WhatsApp* se quiser).
 - **Respostas rápidas** — modelos de mensagem com atalho. No chat do lead, digite `/` (ex.: `/ola`)
@@ -72,7 +81,7 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
 6. **Deixe a janela preta aberta** enquanto usa — fechá-la desliga o CRM e o WhatsApp.
 
 Para trocar a senha, apague o arquivo `senha.txt` da pasta e inicie de novo.
-Seus dados ficam na pasta `data/` — copie essa pasta para fazer backup.
+Seus dados ficam na pasta `data/` (leads, conversas e os arquivos de mídia em `data/midia/`) — copie essa pasta para fazer backup.
 
 ## Como rodar (pelo terminal)
 

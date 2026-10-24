@@ -14,6 +14,15 @@ export const ehConversaIndividual = (jid) => /@(s\.whatsapp\.net|lid)$/.test(Str
 /** Telefone (só dígitos) de um JID de número; vazio para JID anônimo (@lid). */
 export const telefoneDoJid = (jid) => (String(jid).endsWith("@s.whatsapp.net") ? digitos(String(jid).split("@")[0].split(":")[0]) : "");
 
+const ROTULO_MIDIA = { imagem: "📷 Foto", video: "🎥 Vídeo", audio: "🎤 Áudio", documento: "📄 Documento", figurinha: "Figurinha" };
+
+/** Texto curto de uma mensagem, para a lista de conversas. */
+export function previa(m) {
+  if (!m.midia) return m.texto;
+  const rotulo = m.midia.tipo === "documento" && m.midia.nome ? `📄 ${m.midia.nome}` : ROTULO_MIDIA[m.midia.tipo] || "Anexo";
+  return m.texto ? `${rotulo} · ${m.texto}` : rotulo;
+}
+
 export class Conversas {
   constructor(dir) {
     this.arquivo = path.join(dir, "conversas.json");
@@ -82,21 +91,40 @@ export class Conversas {
    * mensagens do histórico entram sem mexer no contador. Devolve true se a mensagem era inédita.
    */
   registrar(jid, msg, { nova = false } = {}) {
-    if (!ehConversaIndividual(jid) || !msg.texto) return false;
+    if (!ehConversaIndividual(jid) || (!msg.texto && !msg.midia)) return false;
     const c = this.#garantir(jid);
-    if (msg.id && c.mensagens.some((m) => m.id === msg.id)) return false;
-    c.mensagens.push({ id: msg.id || "", direcao: msg.direcao, texto: msg.texto, em: msg.em });
+    const repetida = msg.id && c.mensagens.find((m) => m.id === msg.id);
+    if (repetida) {
+      // O eco do WhatsApp pode chegar antes de o CRM registrar o envio: junta o arquivo local.
+      if (msg.midia?.arquivo && repetida.midia && !repetida.midia.arquivo) {
+        repetida.midia.arquivo = msg.midia.arquivo;
+        this.agendarSalvar();
+      }
+      return false;
+    }
+    const nova_ = { id: msg.id || "", direcao: msg.direcao, texto: msg.texto || "", em: msg.em };
+    if (msg.midia) nova_.midia = msg.midia;
+    c.mensagens.push(nova_);
     c.mensagens.sort((a, b) => a.em.localeCompare(b.em));
     if (c.mensagens.length > MAX_MENSAGENS) c.mensagens = c.mensagens.slice(-MAX_MENSAGENS);
     const ultima = c.mensagens.at(-1);
     c.ultimaEm = ultima.em;
-    c.ultimaMensagem = (ultima.direcao === "saida" ? "Você: " : "") + ultima.texto.slice(0, 120);
+    c.ultimaMensagem = (ultima.direcao === "saida" ? "Você: " : "") + previa(ultima).slice(0, 120);
     if (msg.direcao === "entrada" && msg.nome && !c.nome) c.nome = msg.nome;
     if (msg.telefone && !c.telefone) c.telefone = digitos(msg.telefone);
     if (nova && msg.direcao === "entrada") c.naoLidas = (c.naoLidas || 0) + 1;
     if (msg.direcao === "saida") c.naoLidas = 0; // respondeu pelo celular ou pelo CRM
     this.agendarSalvar();
     return true;
+  }
+
+  /** Acha uma mensagem pelo id (para servir a mídia dela). */
+  mensagemPorId(id) {
+    for (const c of this.mapa.values()) {
+      const m = c.mensagens.find((x) => x.id === id);
+      if (m) return m;
+    }
+    return undefined;
   }
 
   marcarLida(jid) {

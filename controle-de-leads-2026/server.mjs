@@ -1,8 +1,11 @@
 // Controle de Leads 2026 — servidor HTTP (API REST + eventos em tempo real + frontend estático).
 import { spawn } from "node:child_process";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createWriteStream, existsSync } from "node:fs";
+import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { Conversas } from "./conversas.mjs";
@@ -56,9 +59,9 @@ whatsapp.on("conversa", (dados) => {
 
 // Toda mensagem (recebida, enviada pelo celular ou pelo CRM, ou do histórico) entra na caixa de
 // entrada. Se a conversa é de um lead, entra também no histórico dele.
-whatsapp.on("mensagem", async ({ jid, id, fromMe, telefone, nome, texto, em, nova, historico }) => {
+whatsapp.on("mensagem", async ({ jid, id, fromMe, telefone, nome, texto, midia, em, nova, historico }) => {
   try {
-    const msg = { id, direcao: fromMe ? "saida" : "entrada", texto, em };
+    const msg = { id, direcao: fromMe ? "saida" : "entrada", texto, em, midia };
     const inedita = conversas.registrar(jid, { ...msg, nome, telefone }, { nova });
     avisarConversas();
     if (!inedita || historico) return; // histórico antigo só vai para o lead quando ele é ligado
@@ -221,6 +224,12 @@ function resumoLead(lead) {
   return lead ? { id: lead.id, nome: lead.nome, etapa: lead.etapa } : null;
 }
 
+/** Conversa para a tela: a mídia vai só com a descrição (as chaves de download ficam no servidor). */
+function paraTela(c, lead) {
+  const mensagens = c.mensagens.map(({ midia, ...m }) => (midia ? { ...m, midia: { tipo: midia.tipo, mimetype: midia.mimetype, nome: midia.nome, tamanho: midia.tamanho, segundos: midia.segundos, ptt: midia.ptt } } : m));
+  return { ...c, mensagens, lead: resumoLead(lead) };
+}
+
 app.get("/api/conversas", (_req, res) => {
   // Índices para achar o lead de cada conversa sem varrer a lista inteira a cada uma.
   const porJid = new Map();
@@ -240,7 +249,7 @@ app.get("/api/conversas", (_req, res) => {
 app.get("/api/conversas/:jid", (req, res) => {
   const c = conversas.obter(req.params.jid);
   if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
-  res.json({ data: { ...c, lead: resumoLead(leadDaConversa(c.jid, c.telefone)) } });
+  res.json({ data: paraTela(c, leadDaConversa(c.jid, c.telefone)) });
 });
 
 app.post("/api/conversas/:jid/lida", (req, res) => {
@@ -268,7 +277,120 @@ app.post("/api/conversas/:jid/mensagens", assincrono(async (req, res) => {
     transmitir("leads", { motivo: "mensagem", id: lead.id });
   }
   avisarConversas();
-  res.json({ data: { ...c, lead: resumoLead(lead) } });
+  res.json({ data: paraTela(c, lead) });
+}));
+
+// ---- mídia: fotos, vídeos, áudios e documentos ----
+const PASTA_MIDIA = path.join(DADOS, "midia");
+await mkdir(PASTA_MIDIA, { recursive: true });
+const LIMITE_DOWNLOAD = 200 * 1024 * 1024;
+const LIMITE_ENVIO = "64mb";
+const EXTENSOES = {
+  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+  "video/mp4": "mp4", "video/3gpp": "3gp", "video/webm": "webm", "video/quicktime": "mov",
+  "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/aac": "aac", "audio/wav": "wav", "audio/webm": "weba",
+  "application/pdf": "pdf",
+};
+// Só estes tipos abrem dentro do navegador. Todo o resto é baixado como arquivo: um "documento"
+// HTML ou SVG mandado por um contato nunca roda dentro do CRM.
+const ABRE_NO_NAVEGADOR = /^(image\/(jpeg|png|webp|gif)|video\/(mp4|webm|3gpp|quicktime)|audio\/[\w.+-]+|application\/pdf)$/;
+const baixando = new Map(); // id → download em andamento (dois cliques não baixam duas vezes)
+
+function nomeDeArquivoSeguro(nome, padrao = "arquivo") {
+  return String(nome || padrao).replace(/[\\/:*?"<>|\r\n\t]/g, "_").slice(0, 150) || padrao;
+}
+
+function baixarParaDisco(m) {
+  if (baixando.has(m.id)) return baixando.get(m.id);
+  const tarefa = (async () => {
+    const arquivo = `${String(m.id).replace(/[^\w-]/g, "").slice(0, 80) || randomUUID()}.${EXTENSOES[m.midia.mimetype] || "bin"}`;
+    const destino = path.join(PASTA_MIDIA, arquivo);
+    const parcial = destino + ".parcial";
+    const conteudo = await whatsapp.baixarMidia(m.midia.wa);
+    try {
+      if (Buffer.isBuffer(conteudo)) await writeFile(parcial, conteudo);
+      else await pipeline(conteudo, createWriteStream(parcial));
+      await rename(parcial, destino);
+    } catch (e) {
+      await unlink(parcial).catch(() => {});
+      throw e;
+    }
+    return arquivo;
+  })().finally(() => baixando.delete(m.id));
+  baixando.set(m.id, tarefa);
+  return tarefa;
+}
+
+// Entrega a mídia de uma mensagem. Na primeira vez baixa do WhatsApp e guarda em data/midia.
+app.get("/api/midia/:id", assincrono(async (req, res) => {
+  const m = conversas.mensagemPorId(req.params.id);
+  if (!m?.midia) return res.status(404).json({ error: { message: "Mídia não encontrada" } });
+  const midia = m.midia;
+  if (midia.arquivo && !existsSync(path.join(PASTA_MIDIA, midia.arquivo))) delete midia.arquivo; // apagaram a pasta
+  if (!midia.arquivo) {
+    if (!midia.wa) return res.status(410).json({ error: { message: "Arquivo indisponível" } });
+    if (midia.tamanho > LIMITE_DOWNLOAD) return res.status(413).json({ error: { message: "Arquivo grande demais para abrir aqui; abra no celular." } });
+    try {
+      midia.arquivo = await baixarParaDisco(m);
+      conversas.agendarSalvar();
+    } catch (e) {
+      const desconectado = whatsapp.status !== "conectado";
+      return res.status(desconectado ? 409 : 502).json({
+        error: { message: desconectado ? "Conecte o WhatsApp para baixar esta mídia." : `Não foi possível baixar a mídia do WhatsApp (${e.message}).` },
+      });
+    }
+  }
+  const mime = midia.mimetype || "application/octet-stream";
+  const abrir = ABRE_NO_NAVEGADOR.test(mime) && req.query.baixar !== "1";
+  const nome = nomeDeArquivoSeguro(midia.nome, `${midia.tipo}.${EXTENSOES[mime] || "bin"}`);
+  res.set({
+    "Content-Type": abrir ? mime : "application/octet-stream",
+    "Content-Disposition": `${abrir ? "inline" : "attachment"}; filename="${nome.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(nome)}`,
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox",
+    "Cache-Control": "private, max-age=86400",
+  });
+  res.sendFile(path.join(PASTA_MIDIA, midia.arquivo)); // aceita Range: áudio e vídeo avançam/voltam
+}));
+
+// Envia um arquivo pela conversa. O corpo é o próprio arquivo; nome, tipo e legenda vão em cabeçalhos.
+app.post("/api/conversas/:jid/anexos", express.raw({ type: "application/octet-stream", limit: LIMITE_ENVIO }), assincrono(async (req, res) => {
+  const c = conversas.obter(req.params.jid);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  if (!Buffer.isBuffer(req.body) || !req.body.length) throw new ErroValidacao("Arquivo vazio");
+  const decodificar = (v) => {
+    try { return decodeURIComponent(String(v || "")); } catch { return ""; }
+  };
+  const mimetype = decodificar(req.get("x-tipo-arquivo")).split(";")[0].trim().toLowerCase() || "application/octet-stream";
+  if (!/^[\w.+-]+\/[\w.+-]+$/.test(mimetype)) throw new ErroValidacao("Tipo de arquivo inválido");
+  const nome = nomeDeArquivoSeguro(decodificar(req.get("x-nome-arquivo")));
+  const legenda = decodificar(req.get("x-legenda")).trim().slice(0, 1000);
+  const extensao = EXTENSOES[mimetype] || path.extname(nome).slice(1).replace(/[^\w]/g, "").slice(0, 8) || "bin";
+  const arquivo = `envio-${randomUUID()}.${extensao}`;
+  const caminho = path.join(PASTA_MIDIA, arquivo);
+  await writeFile(caminho, req.body);
+  let enviada;
+  try {
+    enviada = await whatsapp.enviarMidiaParaJid(c.jid, { caminho, mimetype, nome, legenda });
+  } catch (e) {
+    await unlink(caminho).catch(() => {});
+    return res.status(409).json({ error: { message: e.message } });
+  }
+  // O WhatsApp não mostra legenda em áudio: nesse caso ela segue como mensagem de texto.
+  const legendaSeparada = enviada.tipo === "audio" && legenda;
+  const msgs = [{ id: enviada.id, direcao: "saida", texto: legendaSeparada ? "" : legenda, em: enviada.em, midia: { tipo: enviada.tipo, mimetype, nome, tamanho: req.body.length, arquivo } }];
+  if (legendaSeparada) {
+    const texto = await whatsapp.enviarParaJid(c.jid, legenda).catch(() => null);
+    if (texto) msgs.push({ id: texto.id, direcao: "saida", texto: legenda, em: texto.em });
+  }
+  const lead = leadDaConversa(c.jid, c.telefone);
+  for (const msg of msgs) {
+    conversas.registrar(c.jid, msg);
+    if (lead) await store.registrarMensagem(lead.id, msg);
+  }
+  if (lead) transmitir("leads", { motivo: "mensagem", id: lead.id });
+  avisarConversas();
+  res.json({ data: paraTela(c, lead) });
 }));
 
 // Liga a conversa a um lead que já existe (útil quando o WhatsApp esconde o número).

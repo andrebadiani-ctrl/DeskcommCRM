@@ -92,6 +92,55 @@
     if (m) return `+351 ${m[1]} ${m[2]} ${m[3]}`;
     return d ? "+" + d : "";
   }
+  // ---------- mídia nas mensagens (foto, vídeo, áudio, documento, figurinha) ----------
+  function tamanhoLegivel(bytes) {
+    if (!bytes) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
+  }
+  const duracao = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}` : "");
+  const ICONE_DOC = `<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>`;
+
+  function htmlMidia(m) {
+    const md = m.midia;
+    const url = `/api/midia/${encodeURIComponent(m.id || "")}`;
+    if (!m.id) return `<div class="midia-erro">Anexo indisponível</div>`;
+    if (md.tipo === "imagem") return `<a class="midia-img" href="${url}" target="_blank" rel="noopener" title="Abrir a foto"><img src="${url}" alt="Foto" loading="lazy" data-midia /></a>`;
+    if (md.tipo === "figurinha") return `<img class="midia-figurinha" src="${url}" alt="Figurinha" loading="lazy" data-midia />`;
+    if (md.tipo === "video") return `<video class="midia-video" controls preload="none" playsinline src="${url}" data-midia></video>`;
+    if (md.tipo === "audio") {
+      return `<div class="midia-audio"><span class="midia-audio-icone" title="${md.ptt ? "Mensagem de voz" : "Áudio"}">${md.ptt ? "🎤" : "🎵"}</span><audio controls preload="none" src="${url}" data-midia></audio>${md.segundos ? `<small>${duracao(md.segundos)}</small>` : ""}</div>`;
+    }
+    const nome = md.nome || "Documento";
+    const ext = (nome.includes(".") ? nome.split(".").pop() : (md.mimetype || "").split("/").pop() || "arq").slice(0, 4).toUpperCase();
+    return `<div class="midia-doc">
+      <span class="doc-icone">${ICONE_DOC}<b>${esc(ext)}</b></span>
+      <span class="doc-info"><strong title="${esc(nome)}">${esc(nome)}</strong><small>${[tamanhoLegivel(md.tamanho), md.mimetype].filter(Boolean).map(esc).join(" · ")}</small></span>
+      <span class="doc-acoes"><a href="${url}" target="_blank" rel="noopener">Abrir</a><a href="${url}?baixar=1" download>Baixar</a></span>
+    </div>`;
+  }
+
+  /** Conteúdo de um balão: mídia (se houver) + texto/legenda. */
+  const conteudoDaMensagem = (m) => (m.midia ? htmlMidia(m) : "") + (m.texto ? `<span class="msg-texto">${esc(m.texto)}</span>` : "");
+
+  // Mídia que não carregou (WhatsApp desconectado, arquivo expirado…): explica e deixa tentar de novo.
+  document.addEventListener("error", (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLElement) || !el.matches?.("[data-midia]")) return;
+    const url = el.getAttribute("src");
+    const caixa = document.createElement("div");
+    caixa.className = "midia-erro";
+    caixa.innerHTML = `Não foi possível abrir este arquivo. ${estado.whatsapp.status === "conectado" ? "" : "Conecte o WhatsApp e "}<button type="button" class="link">tentar de novo</button>`;
+    caixa.querySelector("button").addEventListener("click", () => {
+      const novo = el.cloneNode(true);
+      novo.setAttribute("src", url.split("?")[0] + "?t=" + Date.now());
+      caixa.replaceWith(novo);
+      if (novo.tagName === "AUDIO" || novo.tagName === "VIDEO") novo.play().catch(() => {});
+    });
+    (el.closest(".midia-img") || el.closest(".midia-audio") || el).replaceWith(caixa);
+  }, true);
+
   const regiaoDe = (l) => (l.pais === "Brasil" ? l.uf : l.pais === "Portugal" ? l.distrito : "");
 
   function toast(mensagem, erro = false) {
@@ -560,13 +609,30 @@
     form.distrito.innerHTML = opcoesRegiao("Portugal", distrito, "Selecione o distrito");
   }
 
+  /**
+   * Desenha os balões só acrescentando as mensagens novas: redesenhar tudo destruiria o áudio ou
+   * vídeo que está tocando sempre que chegasse qualquer mensagem.
+   */
+  function renderBaloes(caixa, chave, mensagens, montar, vazio) {
+    const ids = mensagens.map((m) => m.id || m.em);
+    const antes = caixa._ids || [];
+    const soAcrescentou = caixa._chave === chave && antes.length > 0 && antes.length <= ids.length && antes.every((id, i) => id === ids[i]);
+    if (soAcrescentou && antes.length === ids.length) return;
+    if (soAcrescentou) caixa.insertAdjacentHTML("beforeend", montar(mensagens.slice(antes.length), mensagens[antes.length - 1]));
+    else caixa.innerHTML = mensagens.length ? montar(mensagens, null) : vazio;
+    caixa._ids = ids;
+    caixa._chave = chave;
+  }
+  const classeBalao = (m) => `msg ${m.direcao === "saida" ? "saida" : "entrada"}${m.midia ? " com-midia" : ""}`;
+
   function renderMensagens(lead) {
-    const msgs = lead.mensagens || [];
     const caixa = $("#mensagens");
-    caixa.innerHTML = msgs.length
-      ? msgs.map((m) => `<div class="msg ${m.direcao === "saida" ? "saida" : "entrada"}">${esc(m.texto)}<time>${new Date(m.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time></div>`).join("")
-      : `<div class="sem-msg">Nenhuma mensagem trocada com este lead ainda.</div>`;
-    caixa.scrollTop = caixa.scrollHeight;
+    const pertoDoFim = caixa.scrollHeight - caixa.scrollTop - caixa.clientHeight < 80;
+    const mudouDeLead = caixa._chave !== lead.id;
+    renderBaloes(caixa, lead.id, lead.mensagens || [], (lista) =>
+      lista.map((m) => `<div class="${classeBalao(m)}">${conteudoDaMensagem(m)}<time>${new Date(m.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time></div>`).join(""),
+      `<div class="sem-msg">Nenhuma mensagem trocada com este lead ainda.</div>`);
+    if (mudouDeLead || pertoDoFim) caixa.scrollTop = caixa.scrollHeight;
     atualizarAvisoWhatsApp(lead);
   }
 
@@ -1273,13 +1339,15 @@
   function renderMensagensConversa({ rolar = false } = {}) {
     const caixa = $("#cv-mensagens");
     const pertoDoFim = caixa.scrollHeight - caixa.scrollTop - caixa.clientHeight < 80;
-    let dia = "";
-    caixa.innerHTML = (estado.conversaDados.mensagens || []).map((m) => {
-      const d = new Date(m.em);
-      const rotuloDia = d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
-      const separador = rotuloDia !== dia ? `<div class="cv-dia"><span>${esc((dia = rotuloDia))}</span></div>` : "";
-      return `${separador}<div class="msg ${m.direcao === "saida" ? "saida" : "entrada"}">${esc(m.texto)}<time>${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time></div>`;
-    }).join("") || `<div class="sem-msg">Sem mensagens de texto nesta conversa ainda.</div>`;
+    const rotuloDoDia = (m) => new Date(m.em).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+    renderBaloes(caixa, estado.conversaAberta, estado.conversaDados.mensagens || [], (lista, anterior) => {
+      let dia = anterior ? rotuloDoDia(anterior) : "";
+      return lista.map((m) => {
+        const rotulo = rotuloDoDia(m);
+        const separador = rotulo !== dia ? `<div class="cv-dia"><span>${esc((dia = rotulo))}</span></div>` : "";
+        return `${separador}<div class="${classeBalao(m)}">${conteudoDaMensagem(m)}<time>${new Date(m.em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time></div>`;
+      }).join("");
+    }, `<div class="sem-msg">Sem mensagens nesta conversa ainda.</div>`);
     if (rolar || pertoDoFim) caixa.scrollTop = caixa.scrollHeight;
   }
 
@@ -1313,6 +1381,7 @@
     estado.conversaAberta = jid;
     if (mudou) {
       $("#cv-texto").value = "";
+      limparAnexo();
       compositorConversa.renderAtalhos();
     }
     renderConversas();
@@ -1334,19 +1403,86 @@
     renderConversas();
   }
 
+  // ---- anexos: escolhido pelo 📎 ou arrastado para o chat; a legenda é o texto digitado ----
+  const LIMITE_ANEXO = 64 * 1024 * 1024;
+  let anexoPendente = null;
+
+  function escolherAnexo(arquivo) {
+    if (!arquivo) return;
+    if (arquivo.size > LIMITE_ANEXO) return toast("Arquivo grande demais (máximo 64 MB)", true);
+    if (!arquivo.size) return toast("Arquivo vazio", true);
+    anexoPendente = arquivo;
+    renderAnexoPendente();
+    $("#cv-texto").placeholder = "Legenda (opcional)…";
+    $("#cv-texto").focus();
+  }
+  function limparAnexo() {
+    anexoPendente = null;
+    $("#cv-arquivo").value = "";
+    $("#cv-texto").placeholder = "Escreva uma mensagem… (digite / para respostas rápidas)";
+    renderAnexoPendente();
+  }
+  function renderAnexoPendente() {
+    const caixa = $("#cv-anexo");
+    caixa.hidden = !anexoPendente;
+    if (!anexoPendente) return (caixa.innerHTML = "");
+    const icone = anexoPendente.type.startsWith("image/") ? "📷" : anexoPendente.type.startsWith("video/") ? "🎥" : anexoPendente.type.startsWith("audio/") ? "🎤" : "📄";
+    caixa.innerHTML = `<span>${icone}</span><strong>${esc(anexoPendente.name)}</strong><small>${tamanhoLegivel(anexoPendente.size)}</small>
+      <button type="button" class="icone-btn" id="cv-anexo-remover" aria-label="Remover anexo"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>`;
+  }
+  $("#cv-arquivo").addEventListener("change", (e) => escolherAnexo(e.target.files[0]));
+  $("#cv-anexo").addEventListener("click", (e) => e.target.closest("#cv-anexo-remover") && limparAnexo());
+  const areaChat = $(".inbox-chat");
+  areaChat.addEventListener("dragover", (e) => {
+    if (!estado.conversaAberta || !e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    areaChat.classList.add("soltar");
+  });
+  areaChat.addEventListener("dragleave", (e) => !areaChat.contains(e.relatedTarget) && areaChat.classList.remove("soltar"));
+  areaChat.addEventListener("drop", (e) => {
+    areaChat.classList.remove("soltar");
+    if (!estado.conversaAberta || !e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    escolherAnexo(e.dataTransfer.files[0]);
+  });
+
+  async function enviarAnexo(arquivo, legenda) {
+    const res = await fetch(`/api/conversas/${jidUrl(estado.conversaAberta)}/anexos`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Tipo-Arquivo": encodeURIComponent(arquivo.type || "application/octet-stream"),
+        "X-Nome-Arquivo": encodeURIComponent(arquivo.name || "arquivo"),
+        "X-Legenda": encodeURIComponent(legenda),
+      },
+      body: arquivo,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error?.message || (res.status === 413 ? "Arquivo grande demais" : `Erro ${res.status}`));
+    return json.data;
+  }
+
   async function enviarNaConversa() {
     const campo = $("#cv-texto");
     const texto = campo.value.trim();
-    if (!texto || !estado.conversaAberta) return;
+    if ((!texto && !anexoPendente) || !estado.conversaAberta) return;
     const botao = $("#cv-enviar");
     botao.disabled = true;
+    const textoOriginal = botao.textContent;
+    if (anexoPendente) botao.textContent = "Enviando…";
     try {
-      estado.conversaDados = await api("POST", `/api/conversas/${jidUrl(estado.conversaAberta)}/mensagens`, { texto });
+      if (anexoPendente) {
+        estado.conversaDados = await enviarAnexo(anexoPendente, texto);
+        limparAnexo();
+      } else {
+        estado.conversaDados = await api("POST", `/api/conversas/${jidUrl(estado.conversaAberta)}/mensagens`, { texto });
+      }
       campo.value = "";
       renderMensagensConversa({ rolar: true });
     } catch (err) {
       toast(err.message, true);
     } finally {
+      botao.textContent = textoOriginal;
       renderAvisoConversa();
     }
   }

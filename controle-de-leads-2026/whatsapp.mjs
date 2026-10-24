@@ -5,7 +5,9 @@ import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import {
   Browsers,
+  BufferJSON,
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   makeWASocket,
   useMultiFileAuthState,
@@ -17,29 +19,51 @@ import { digitos } from "./store.mjs";
 
 const logger = pino({ level: process.env.WA_LOG_LEVEL || "silent" });
 
-function textoDaMensagem(m) {
-  // Mensagens temporárias / de visualização única vêm embrulhadas.
-  const bruta = m.message || {};
-  const msg =
+// Mensagens temporárias / de visualização única vêm embrulhadas.
+function desembrulhar(bruta = {}) {
+  return (
     bruta.ephemeralMessage?.message ||
     bruta.viewOnceMessage?.message ||
     bruta.viewOnceMessageV2?.message ||
+    bruta.viewOnceMessageV2Extension?.message ||
     bruta.documentWithCaptionMessage?.message ||
-    bruta;
-  return (
+    bruta
+  );
+}
+
+const numero = (v) => Number(v?.toString?.() ?? v ?? 0) || 0; // fileLength pode vir como Long
+
+/** Texto e, se houver, a mídia (foto, vídeo, áudio, documento, figurinha) de uma mensagem. */
+function conteudoDaMensagem(m) {
+  const msg = desembrulhar(m.message || {});
+  const midia = (tipo, c, extra = {}) => ({
+    tipo,
+    mimetype: String(c.mimetype || "").split(";")[0].trim(),
+    nome: c.fileName || c.title || "",
+    tamanho: numero(c.fileLength),
+    segundos: numero(c.seconds),
+    ...extra,
+  });
+  if (msg.imageMessage) return { texto: msg.imageMessage.caption || "", midia: midia("imagem", msg.imageMessage) };
+  if (msg.videoMessage) return { texto: msg.videoMessage.caption || "", midia: midia("video", msg.videoMessage) };
+  if (msg.audioMessage) return { texto: "", midia: midia("audio", msg.audioMessage, { ptt: !!msg.audioMessage.ptt }) };
+  if (msg.documentMessage) return { texto: msg.documentMessage.caption || "", midia: midia("documento", msg.documentMessage) };
+  if (msg.stickerMessage) return { texto: "", midia: midia("figurinha", msg.stickerMessage) };
+  const texto =
     msg.conversation ||
     msg.extendedTextMessage?.text ||
-    msg.imageMessage?.caption ||
-    msg.videoMessage?.caption ||
-    msg.documentMessage?.fileName ||
-    (msg.audioMessage && "[áudio]") ||
-    (msg.imageMessage && "[imagem]") ||
-    (msg.videoMessage && "[vídeo]") ||
-    (msg.stickerMessage && "[figurinha]") ||
-    (msg.locationMessage && "[localização]") ||
-    (msg.contactMessage && "[contato]") ||
-    null
-  );
+    (msg.locationMessage && `📍 Localização: https://maps.google.com/?q=${msg.locationMessage.degreesLatitude},${msg.locationMessage.degreesLongitude}`) ||
+    (msg.contactMessage && `👤 Contato: ${msg.contactMessage.displayName || ""}`) ||
+    "";
+  return { texto, midia: null };
+}
+
+/** Como a mídia vai para o WhatsApp: formatos que o celular reproduz; o resto vai como documento. */
+export function tipoDeEnvio(mimetype) {
+  if (/^image\/(jpeg|png|webp)$/.test(mimetype)) return "imagem";
+  if (mimetype === "video/mp4") return "video";
+  if (/^audio\/(ogg|mpeg|mp4|aac)$/.test(mimetype)) return "audio";
+  return "documento";
 }
 
 export class WhatsApp extends EventEmitter {
@@ -155,8 +179,8 @@ export class WhatsApp extends EventEmitter {
     const avisarMensagem = (m, tipo) => {
       const jid = m.key?.remoteJid || "";
       if (!ehConversaIndividual(jid)) return; // grupos, status e canais ficam de fora
-      const texto = textoDaMensagem(m);
-      if (!texto) return;
+      const { texto, midia } = conteudoDaMensagem(m);
+      if (!texto && !midia) return;
       // Endereçamento por LID esconde o número; quando o WhatsApp manda, ele vem em senderPn.
       const telefone = jid.endsWith("@lid") ? digitos(String(m.key.senderPn || "").split("@")[0].split(":")[0]) : telefoneDoJid(jid);
       this.emit("mensagem", {
@@ -166,6 +190,8 @@ export class WhatsApp extends EventEmitter {
         telefone,
         nome: m.key.fromMe ? "" : m.pushName || "",
         texto,
+        // Guarda a mensagem original (com as chaves da mídia) para baixar o arquivo quando abrirem.
+        midia: midia ? { ...midia, wa: JSON.parse(JSON.stringify({ key: m.key, message: m.message }, BufferJSON.replacer)) } : null,
         em: emData(m.messageTimestamp),
         nova: tipo === "notify", // chegou agora (conta como não lida)
         historico: tipo === "historico", // sincronização inicial: só preenche a caixa de entrada
@@ -237,6 +263,30 @@ export class WhatsApp extends EventEmitter {
   enviarParaLead(lead, texto) {
     if (lead.whatsappJid) return this.enviarParaJid(lead.whatsappJid, texto);
     return this.enviar(lead.telefone, texto, lead.pais);
+  }
+
+  /** Baixa a mídia de uma mensagem guardada; devolve um stream com o arquivo. */
+  async baixarMidia(wa) {
+    const msg = JSON.parse(JSON.stringify(wa), BufferJSON.reviver);
+    const sock = this.sock;
+    // Mídia antiga some do servidor do WhatsApp; com o celular conectado ele reenvia (reupload).
+    const ctx = sock ? { reuploadRequest: sock.updateMediaMessage, logger } : undefined;
+    return downloadMediaMessage(msg, "stream", {}, ctx);
+  }
+
+  /** Envia um arquivo (foto, vídeo, áudio ou documento) para uma conversa. */
+  async enviarMidiaParaJid(jid, { caminho, mimetype, nome, legenda }) {
+    if (this.status !== "conectado" || !this.sock) throw new Error("WhatsApp não está conectado");
+    if (!ehConversaIndividual(jid)) throw new Error("Conversa inválida");
+    const tipo = tipoDeEnvio(mimetype);
+    const arquivo = { url: caminho };
+    const conteudo =
+      tipo === "imagem" ? { image: arquivo, caption: legenda || undefined }
+      : tipo === "video" ? { video: arquivo, caption: legenda || undefined, mimetype }
+      : tipo === "audio" ? { audio: arquivo, mimetype }
+      : { document: arquivo, mimetype: mimetype || "application/octet-stream", fileName: nome || "arquivo", caption: legenda || undefined };
+    const enviada = await this.sock.sendMessage(jid, conteudo);
+    return { jid, id: enviada?.key?.id || "", em: new Date().toISOString(), tipo };
   }
 
   /** Envia direto para uma conversa (serve também para contatos anônimos @lid). */
