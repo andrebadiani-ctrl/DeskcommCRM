@@ -29,6 +29,7 @@
       </div>
       <div class="topo-acoes">
         <span class="versao" id="versao" hidden></span>
+        <button type="button" class="topo-tarefas" id="btn-tarefas" title="Tarefas e lembretes"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2" /><path d="M8 2v4M16 2v4M4 9h16M8.5 14.5l2 2 4-4" /></svg><span class="topo-bolha" id="tarefas-bolha" hidden></span></button>
         <span id="wa-pilula" class="wa-pilula" title="Status do WhatsApp">WhatsApp</span>
         <button id="btn-novo" class="btn btn-primario">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -364,6 +365,19 @@
           <p class="dica" id="wa-aviso-modal"></p>
         </div>
 
+        <div class="historico" id="bloco-tarefas" hidden>
+          <h3><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2" /><path d="M8 2v4M16 2v4M4 9h16M8.5 14.5l2 2 4-4" /></svg>Tarefas deste lead</h3>
+          <div class="lista compacta" id="tarefas-lead"></div>
+          <div class="nova-tarefa" data-nova-tarefa="lead">
+            <input data-tarefa-titulo placeholder="O que fazer? Ex.: ligar para confirmar a reunião" maxlength="200" />
+            <div class="nova-tarefa-linha">
+              <input data-tarefa-quando type="datetime-local" aria-label="Quando" />
+              <button type="button" class="btn btn-secundario" data-tarefa-adicionar>Adicionar</button>
+            </div>
+            <div class="atalhos-hora" data-atalhos-hora></div>
+          </div>
+        </div>
+
         <div class="historico" id="bloco-pedidos" hidden>
           <h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h15l-1.5 8h-12z" /><path d="M6 6L5 3H2" /><circle cx="9" cy="19" r="1.5" /><circle cx="18" cy="19" r="1.5" /></svg>Pedidos deste lead
             <button type="button" class="btn btn-secundario mini" id="lead-novo-pedido" style="margin-left:auto">+ Novo pedido</button></h3>
@@ -395,6 +409,36 @@
   </dialog>
 
   <datalist id="lista-origens"></datalist>
+
+  <!-- Tarefas e lembretes -->
+  <dialog id="modal-tarefas" class="modal">
+    <div class="modal-topo">
+      <h2>Tarefas e lembretes</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo">
+      <div class="nova-tarefa destaque" data-nova-tarefa="geral">
+        <input data-tarefa-titulo placeholder="Nova tarefa — ex.: mandar proposta para a Ana" maxlength="200" />
+        <div class="nova-tarefa-linha">
+          <select data-tarefa-lead aria-label="Lead (opcional)"></select>
+          <input data-tarefa-quando type="datetime-local" aria-label="Quando" />
+          <button type="button" class="btn btn-primario" data-tarefa-adicionar>Adicionar</button>
+        </div>
+        <div class="atalhos-hora" data-atalhos-hora></div>
+      </div>
+      <div id="tarefas-lista"></div>
+      <div class="avisos-config">
+        <h4>Avisos neste aparelho</h4>
+        <label class="check"><input type="checkbox" id="cfg-som" /> Tocar som quando chegar mensagem ou lembrete</label>
+        <div class="notif-linha">
+          <span id="notif-estado"></span>
+          <button type="button" class="btn btn-secundario mini" id="btn-notif">Ativar notificações</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="lembretes" id="lembretes" aria-live="assertive"></div>
 
   <!-- Importar planilha -->
   <dialog id="modal-importar" class="modal modal-largo">

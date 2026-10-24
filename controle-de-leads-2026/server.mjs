@@ -8,11 +8,12 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { Conversas } from "./conversas.mjs";
+import { Conversas, previa } from "./conversas.mjs";
 import { ErroValidacao, Store, chaveTelefone } from "./store.mjs";
 import { Followups } from "./followups.mjs";
 import { LIMITE_IMPORTACAO, normalizarLinha } from "./importacao.mjs";
 import { Pedidos, STATUS_PEDIDO } from "./pedidos.mjs";
+import { Tarefas } from "./tarefas.mjs";
 import { WhatsApp } from "./whatsapp.mjs";
 import { WhatsAppSimulado } from "./whatsapp-simulado.mjs";
 
@@ -29,6 +30,8 @@ const store = new Store(DADOS);
 await store.carregar();
 const pedidos = new Pedidos(DADOS);
 await pedidos.carregar();
+const tarefas = new Tarefas(DADOS);
+await tarefas.carregar();
 const conversas = new Conversas(DADOS);
 await conversas.carregar();
 // WA_SIMULADO=1: modo demonstração, sem celular (ver whatsapp-simulado.mjs).
@@ -86,6 +89,11 @@ whatsapp.on("mensagem", async ({ jid, jidWhatsapp, id, fromMe, telefone, nome, t
     const inedita = conversas.registrar(jid, { ...msg, nome, telefone, jidWhatsapp }, { nova });
     avisarConversas();
     if (!inedita || historico) return; // histórico antigo só vai para o lead quando ele é ligado
+    // Aviso para as telas abertas (som e notificação do navegador).
+    if (nova && !fromMe) {
+      const c = conversas.obter(jid);
+      transmitir("mensagem-nova", { jid, nome: c?.nomeContato || c?.nome || nome || (telefone ? `+${telefone}` : "Contato"), previa: previa(msg).slice(0, 120) });
+    }
 
     let lead = leadDaConversa(jid, telefone);
     if (!lead && !fromMe && nova && store.config.autoCriarLeads) {
@@ -157,12 +165,15 @@ app.post("/api/leads/importar", express.json({ limit: "15mb" }), assincrono(asyn
 app.patch("/api/leads/:id", assincrono(async (req, res) => {
   const lead = await store.atualizar(req.params.id, req.body);
   if (!lead) return res.status(404).json({ error: { message: "Lead não encontrado" } });
+  if ("nome" in (req.body || {})) tarefas.atualizarLead(lead);
   transmitir("leads", { motivo: "atualizado", id: lead.id });
   res.json({ data: lead });
 }));
 
 app.delete("/api/leads/:id", assincrono(async (req, res) => {
+  const excluido = store.obter(req.params.id);
   if (!(await store.excluir(req.params.id))) return res.status(404).json({ error: { message: "Lead não encontrado" } });
+  tarefas.atualizarLead(excluido, { excluido: true }); // a tarefa fica, com o nome de quem era
   pedidos.desligarLead(req.params.id); // os pedidos ficam, com o nome do cliente
   transmitir("leads", { motivo: "excluido", id: req.params.id });
   res.status(204).end();
@@ -256,6 +267,32 @@ app.post("/api/leads/:id/whatsapp", assincrono(async (req, res) => {
   const atualizado = await store.registrarMensagem(lead.id, msg);
   transmitir("leads", { motivo: "mensagem", id: lead.id });
   res.json({ data: atualizado });
+}));
+
+// ---- tarefas e lembretes ----
+const avisarTarefas = () => transmitir("tarefas", {});
+function leadDaTarefa(body) {
+  if (!body?.leadId) return null;
+  const lead = store.obter(String(body.leadId));
+  if (!lead) throw new ErroValidacao("Lead não encontrado");
+  return lead;
+}
+app.get("/api/tarefas", (_req, res) => res.json({ data: tarefas.listar() }));
+app.post("/api/tarefas", assincrono(async (req, res) => {
+  const t = await tarefas.criar(req.body, leadDaTarefa(req.body));
+  avisarTarefas();
+  res.status(201).json({ data: t });
+}));
+app.patch("/api/tarefas/:id", assincrono(async (req, res) => {
+  const t = await tarefas.atualizar(req.params.id, req.body);
+  if (!t) return res.status(404).json({ error: { message: "Tarefa não encontrada" } });
+  avisarTarefas();
+  res.json({ data: t });
+}));
+app.delete("/api/tarefas/:id", assincrono(async (req, res) => {
+  if (!(await tarefas.excluir(req.params.id))) return res.status(404).json({ error: { message: "Tarefa não encontrada" } });
+  avisarTarefas();
+  res.status(204).end();
 }));
 
 // ---- pedidos, produtos e condições de pagamento ----
@@ -600,6 +637,11 @@ app.listen(PORTA, () => {
   if (!SENHA) console.warn("Aviso: APP_PASSWORD não definida — o painel está sem senha.");
   if (process.env.ABRIR_NAVEGADOR === "1") abrirNavegador(`http://localhost:${PORTA}`);
   followups.iniciar();
+  // Chegou a hora de uma tarefa: as telas abertas tocam o aviso.
+  tarefas.iniciar((t) => {
+    transmitir("lembrete", { id: t.id, titulo: t.titulo, leadId: t.leadId, leadNome: t.leadNome, quando: t.quando });
+    avisarTarefas();
+  });
   whatsapp.iniciarSeHouverSessao().catch((e) => console.error("WhatsApp:", e));
 });
 

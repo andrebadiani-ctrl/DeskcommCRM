@@ -329,6 +329,7 @@
       ${l.empresa ? `<p><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M9 7h2M13 7h2M9 11h2M13 11h2M10 21v-4h4v4" /></svg>${esc(l.empresa)}${l.cargo ? ` · ${esc(l.cargo)}` : ""}</p>` : ""}
       ${local ? `<p><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>${esc(local)}</p>` : ""}
       ${(l.etiquetas || []).length ? `<div class="etiquetas">${l.etiquetas.map((e) => `<span class="etiqueta">${esc(e)}</span>`).join("")}</div>` : ""}
+      ${badgeTarefa(l)}
       ${badgeFollowup(l)}
       <div class="cartao-rodape">
         <span class="valor">${moeda(l.faturamentoMensal, l.pais)}<small style="font-weight:500;color:var(--texto-suave)">/mês</small></span>
@@ -734,6 +735,7 @@
     $("#bloco-wa").hidden = !lead;
     $("#bloco-followups").hidden = !lead;
     $("#bloco-pedidos").hidden = !lead;
+    $("#bloco-tarefas").hidden = !lead;
     $("#btn-salvar").textContent = lead ? "Salvar alterações" : "Criar lead";
 
     const v = lead || { pais: "", criadoEm: new Date().toISOString(), ...(preencher || {}) };
@@ -748,6 +750,8 @@
       compositorLead.renderAtalhos();
       atualizarLinkConversa(lead);
       renderPedidosLead(lead);
+      renderTarefasLead(lead);
+      prepararNovaTarefa($("[data-nova-tarefa=lead]"));
       renderFollowupsLead(lead);
       prepararAgendamento();
     }
@@ -1346,6 +1350,7 @@
     const bolha = $("#cv-bolha");
     bolha.hidden = !total;
     bolha.textContent = total > 99 ? "99+" : String(total);
+    document.title = total ? `(${total}) Controle de Leads 2026` : "Controle de Leads 2026";
   }
 
   // Fila de atendimento: quem chegou primeiro aparece primeiro.
@@ -2349,6 +2354,291 @@
   $("#imp-voltar").addEventListener("click", abrirImportacao);
   $$("[data-fechar]", modalImportar).forEach((b) => b.addEventListener("click", () => modalImportar.close()));
 
+  // ---------- avisos: som e notificação do navegador (preferência deste aparelho) ----------
+  const avisos = { som: lerPreferencia("som", "1") === "1", navegador: lerPreferencia("notif", "0") === "1" };
+  let audioCtx = null;
+  // O navegador só libera áudio depois de um clique na página.
+  document.addEventListener("pointerdown", () => {
+    try {
+      audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch {
+      /* sem áudio neste navegador */
+    }
+  });
+  function tocarSom(tipo = "mensagem") {
+    if (!avisos.som || !audioCtx) return;
+    const notas = tipo === "lembrete" ? [880, 660, 880] : [740, 988];
+    notas.forEach((freq, i) => {
+      const t0 = audioCtx.currentTime + i * 0.16;
+      const osc = audioCtx.createOscillator();
+      const vol = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      vol.gain.setValueAtTime(0.0001, t0);
+      vol.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02);
+      vol.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.15);
+      osc.connect(vol).connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.16);
+    });
+  }
+  const notificacoesPossiveis = () => "Notification" in window && window.isSecureContext;
+  function notificar(titulo, corpo, tag, aoClicar) {
+    if (!avisos.navegador || !notificacoesPossiveis() || Notification.permission !== "granted") return;
+    try {
+      const n = new Notification(titulo, { body: corpo, tag, icon: $("link[rel=icon]")?.href });
+      n.onclick = () => {
+        window.focus();
+        aoClicar?.();
+        n.close();
+      };
+    } catch {
+      /* alguns celulares só notificam via service worker */
+    }
+  }
+  function renderConfigAvisos() {
+    $("#cfg-som").checked = avisos.som;
+    const estadoNotif = $("#notif-estado");
+    const botao = $("#btn-notif");
+    botao.hidden = false;
+    if (!("Notification" in window)) {
+      estadoNotif.textContent = "Este navegador não mostra notificações.";
+      botao.hidden = true;
+    } else if (!window.isSecureContext) {
+      estadoNotif.innerHTML = "Notificações do navegador só funcionam em endereço seguro (<strong>https</strong>) ou em <strong>http://localhost</strong>. Pelo endereço da rede local fica só o som.";
+      botao.hidden = true;
+    } else if (Notification.permission === "denied") {
+      estadoNotif.textContent = "Notificações bloqueadas neste navegador. Libere no cadeado ao lado do endereço do site.";
+      botao.hidden = true;
+    } else if (Notification.permission === "granted" && avisos.navegador) {
+      estadoNotif.textContent = "Notificações do navegador ativadas ✓";
+      botao.textContent = "Desativar";
+    } else {
+      estadoNotif.textContent = "Receba um aviso mesmo com o sistema minimizado.";
+      botao.textContent = "Ativar notificações";
+    }
+  }
+  $("#cfg-som").addEventListener("change", (e) => {
+    avisos.som = e.target.checked;
+    gravarPreferencia("som", avisos.som ? "1" : "0");
+    if (avisos.som) tocarSom();
+  });
+  $("#btn-notif").addEventListener("click", async () => {
+    if (Notification.permission === "granted" && avisos.navegador) {
+      avisos.navegador = false;
+    } else {
+      avisos.navegador = (await Notification.requestPermission()) === "granted";
+      if (avisos.navegador) notificar("Notificações ativadas", "Você vai ser avisado de mensagens e lembretes.", "teste");
+    }
+    gravarPreferencia("notif", avisos.navegador ? "1" : "0");
+    renderConfigAvisos();
+  });
+
+  // ---------- tarefas e lembretes ----------
+  let listaTarefas = [];
+  const ICONE_TAREFA = `<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="17" rx="2" /><path d="M8 2v4M16 2v4M4 9h16M8.5 14.5l2 2 4-4" /></svg>`;
+  const paraInputLocal = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const mesmoDia = (a, b) => a.toDateString() === b.toDateString();
+
+  function atalhosDeHora() {
+    const agora = new Date();
+    const em = (dias, h, m = 0) => {
+      const d = new Date(agora);
+      d.setDate(d.getDate() + dias);
+      d.setHours(h, m, 0, 0);
+      return d;
+    };
+    const daquiUmaHora = new Date(Math.ceil((agora.getTime() + 3600_000) / 300_000) * 300_000);
+    const lista = [["Daqui 1h", daquiUmaHora]];
+    if (agora.getHours() < 16) lista.push(["Hoje 17h", em(0, 17)]);
+    lista.push(["Amanhã 9h", em(1, 9)], ["Amanhã 14h", em(1, 14)], ["Em 1 semana", em(7, 9)]);
+    return lista;
+  }
+
+  function quandoLegivel(iso) {
+    const d = new Date(iso);
+    const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const hoje = new Date();
+    if (mesmoDia(d, hoje)) return `hoje ${hora}`;
+    if (mesmoDia(d, new Date(Date.now() + 86400_000))) return `amanhã ${hora}`;
+    if (mesmoDia(d, new Date(Date.now() - 86400_000))) return `ontem ${hora}`;
+    return `${d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })} ${hora}`;
+  }
+  function situacaoTarefa(t) {
+    if (t.feita) return "feita";
+    const d = new Date(t.quando);
+    if (d.getTime() < Date.now()) return "atrasada";
+    return mesmoDia(d, new Date()) ? "hoje" : "proxima";
+  }
+  const porData = (a, b) => a.quando.localeCompare(b.quando);
+
+  async function carregarTarefas() {
+    listaTarefas = await api("GET", "/api/tarefas");
+    renderBolhaTarefas();
+    if ($("#modal-tarefas").open) renderTarefas();
+    if (estado.leadAberto) renderTarefasLead(estado.leads.find((l) => l.id === estado.leadAberto));
+    if (estado.aba === "kanban") render();
+  }
+
+  function renderBolhaTarefas() {
+    const pend = listaTarefas.filter((t) => ["atrasada", "hoje"].includes(situacaoTarefa(t)));
+    const atrasadas = pend.filter((t) => situacaoTarefa(t) === "atrasada").length;
+    const bolha = $("#tarefas-bolha");
+    bolha.hidden = !pend.length;
+    bolha.textContent = String(pend.length);
+    bolha.classList.toggle("urgente", atrasadas > 0);
+    $("#btn-tarefas").title = pend.length ? `${pend.length} tarefa(s) para hoje${atrasadas ? `, ${atrasadas} atrasada(s)` : ""}` : "Tarefas e lembretes";
+  }
+
+  function itemTarefa(t, { mostrarLead = true } = {}) {
+    const sit = situacaoTarefa(t);
+    return `<div class="tarefa tarefa-${sit}">
+      <label class="tarefa-check" title="${t.feita ? "Reabrir" : "Concluir"}"><input type="checkbox" data-tarefa-feita="${t.id}" ${t.feita ? "checked" : ""} /></label>
+      <div class="tarefa-corpo">
+        <span class="tarefa-titulo">${esc(t.titulo)}</span>
+        <span class="tarefa-info"><span class="tarefa-quando">${sit === "atrasada" ? "⚠ " : ""}${quandoLegivel(t.quando)}</span>${mostrarLead && (t.leadId || t.leadNome) ? ` · ${t.leadId ? `<a href="#" data-abrir-lead="${t.leadId}">${esc(t.leadNome)}</a>` : esc(t.leadNome)}` : ""}</span>
+      </div>
+      <button type="button" class="icone-btn del" data-tarefa-excluir="${t.id}" title="Excluir"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg></button>
+    </div>`;
+  }
+
+  function renderTarefas() {
+    const grupos = [
+      ["Atrasadas", listaTarefas.filter((t) => situacaoTarefa(t) === "atrasada").sort(porData)],
+      ["Hoje", listaTarefas.filter((t) => situacaoTarefa(t) === "hoje").sort(porData)],
+      ["Próximas", listaTarefas.filter((t) => situacaoTarefa(t) === "proxima").sort(porData)],
+      ["Concluídas", listaTarefas.filter((t) => t.feita).sort((a, b) => (b.feitaEm || "").localeCompare(a.feitaEm || "")).slice(0, 10)],
+    ].filter(([, l]) => l.length);
+    $("#tarefas-lista").innerHTML = grupos.length
+      ? grupos.map(([titulo, l]) => `<h4 class="tarefas-grupo">${titulo} <span>${l.length}</span></h4>${l.map((t) => itemTarefa(t)).join("")}`).join("")
+      : `<p class="sem-msg">Nenhuma tarefa. Crie a primeira acima — ex.: “ligar para o João amanhã às 9h”.</p>`;
+  }
+
+  function renderTarefasLead(lead) {
+    if (!lead) return;
+    const doLead = listaTarefas.filter((t) => t.leadId === lead.id);
+    const lista = [...doLead.filter((t) => !t.feita).sort(porData), ...doLead.filter((t) => t.feita).slice(-3)];
+    $("#tarefas-lead").innerHTML = lista.length ? lista.map((t) => itemTarefa(t, { mostrarLead: false })).join("") : `<p class="sem-msg">Nenhuma tarefa para este lead.</p>`;
+  }
+
+  function prepararNovaTarefa(caixa) {
+    $("[data-tarefa-titulo]", caixa).value = "";
+    $("[data-tarefa-quando]", caixa).value = paraInputLocal(atalhosDeHora().find(([r]) => r === "Amanhã 9h")[1]);
+    $("[data-atalhos-hora]", caixa).innerHTML = atalhosDeHora().map(([r, d]) => `<button type="button" class="chip" data-hora="${paraInputLocal(d)}">${r}</button>`).join("");
+    const sel = $("[data-tarefa-lead]", caixa);
+    if (sel) {
+      sel.innerHTML = `<option value="">Sem lead</option>` + [...estado.leads].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).map((l) => `<option value="${l.id}">${esc(l.nome)}</option>`).join("");
+    }
+  }
+
+  async function adicionarTarefa(caixa) {
+    const titulo = $("[data-tarefa-titulo]", caixa).value.trim();
+    const quando = $("[data-tarefa-quando]", caixa).value;
+    if (!titulo) return $("[data-tarefa-titulo]", caixa).focus(), toast("Escreva o que precisa ser feito", true);
+    if (!quando) return toast("Escolha o dia e a hora", true);
+    const leadId = caixa.dataset.novaTarefa === "lead" ? estado.leadAberto : $("[data-tarefa-lead]", caixa)?.value || "";
+    try {
+      const t = await api("POST", "/api/tarefas", { titulo, quando: new Date(quando).toISOString(), leadId });
+      toast(`Tarefa marcada para ${quandoLegivel(t.quando)}`);
+      prepararNovaTarefa(caixa);
+      await carregarTarefas();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  // Tudo delegado: as mesmas peças aparecem na janela de tarefas e dentro do lead.
+  document.addEventListener("click", async (e) => {
+    const caixa = e.target.closest("[data-nova-tarefa]");
+    if (caixa && e.target.closest("[data-tarefa-adicionar]")) return adicionarTarefa(caixa);
+    const hora = e.target.closest("[data-hora]");
+    if (caixa && hora) {
+      $("[data-tarefa-quando]", caixa).value = hora.dataset.hora;
+      $$("[data-hora]", caixa).forEach((b) => b.classList.toggle("ativo", b === hora));
+      return;
+    }
+    const excluir = e.target.closest("[data-tarefa-excluir]");
+    if (excluir) {
+      if (!confirm("Excluir esta tarefa?")) return;
+      try {
+        await api("DELETE", `/api/tarefas/${excluir.dataset.tarefaExcluir}`);
+        await carregarTarefas();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.matches("[data-tarefa-titulo]")) {
+      e.preventDefault();
+      adicionarTarefa(e.target.closest("[data-nova-tarefa]"));
+    }
+  });
+  document.addEventListener("change", async (e) => {
+    const id = e.target.dataset?.tarefaFeita;
+    if (!id) return;
+    try {
+      await api("PATCH", `/api/tarefas/${id}`, { feita: e.target.checked });
+      if (e.target.checked) toast("Tarefa concluída ✓");
+      await carregarTarefas();
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      toast(err.message, true);
+    }
+  });
+
+  const modalTarefas = $("#modal-tarefas");
+  $("#btn-tarefas").addEventListener("click", () => {
+    prepararNovaTarefa($("[data-nova-tarefa=geral]"));
+    renderTarefas();
+    renderConfigAvisos();
+    modalTarefas.showModal();
+  });
+  $$("[data-fechar]", modalTarefas).forEach((b) => b.addEventListener("click", () => modalTarefas.close()));
+  modalTarefas.addEventListener("click", (e) => e.target === modalTarefas && modalTarefas.close());
+
+  // "Hoje" vira "atrasada" com o passar do tempo: recalcula o contador a cada minuto.
+  setInterval(() => renderBolhaTarefas(), 60_000);
+
+  /** Cartão do Kanban: tarefa atrasada ou de hoje do lead. */
+  function badgeTarefa(l) {
+    const t = listaTarefas.filter((x) => x.leadId === l.id && ["atrasada", "hoje"].includes(situacaoTarefa(x))).sort(porData)[0];
+    if (!t) return "";
+    const atrasada = situacaoTarefa(t) === "atrasada";
+    return `<p class="selo-tarefa${atrasada ? " atrasada" : ""}" title="${esc(t.titulo)}">${ICONE_TAREFA}${atrasada ? "Atrasada" : quandoLegivel(t.quando)}: ${esc(t.titulo)}</p>`;
+  }
+
+  // Aviso na hora da tarefa: fica na tela até a pessoa decidir.
+  function mostrarLembrete(t) {
+    tocarSom("lembrete");
+    notificar("⏰ Lembrete", `${t.titulo}${t.leadNome ? ` — ${t.leadNome}` : ""}`, `tarefa-${t.id}`, () => t.leadId && abrirModal(t.leadId));
+    const el = document.createElement("div");
+    el.className = "lembrete";
+    el.innerHTML = `<div class="lembrete-topo">${ICONE_TAREFA}<strong>Lembrete</strong><button type="button" class="icone-btn" data-fechar-lembrete aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button></div>
+      <p>${esc(t.titulo)}</p>${t.leadNome ? `<small>${esc(t.leadNome)} · ${quandoLegivel(t.quando)}</small>` : `<small>${quandoLegivel(t.quando)}</small>`}
+      <div class="lembrete-acoes">
+        <button type="button" class="btn btn-primario mini" data-lembrete="concluir">✓ Concluir</button>
+        <button type="button" class="btn btn-secundario mini" data-lembrete="adiar">Adiar 1h</button>
+        ${t.leadId ? `<button type="button" class="btn btn-fantasma mini" data-lembrete="abrir">Abrir lead</button>` : ""}
+      </div>`;
+    el.addEventListener("click", async (e) => {
+      const acao = e.target.closest("[data-lembrete]")?.dataset.lembrete;
+      if (e.target.closest("[data-fechar-lembrete]")) return el.remove();
+      if (!acao) return;
+      try {
+        if (acao === "concluir") await api("PATCH", `/api/tarefas/${t.id}`, { feita: true });
+        if (acao === "adiar") await api("PATCH", `/api/tarefas/${t.id}`, { quando: new Date(Date.now() + 3600_000).toISOString() });
+        if (acao === "abrir") abrirModal(t.leadId);
+        el.remove();
+        if (acao !== "abrir") toast(acao === "concluir" ? "Tarefa concluída ✓" : "Lembrete adiado para daqui 1 hora");
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+    $("#lembretes").append(el);
+  }
+
   // ---------- topo, abas e filtros ----------
   function trocarAba(aba) {
     estado.aba = aba;
@@ -2504,6 +2794,19 @@
     });
     fonte.addEventListener("conversas", agendarConversas);
     fonte.addEventListener("pedidos", () => carregarPedidos().catch(() => {}));
+    fonte.addEventListener("tarefas", () => carregarTarefas().catch(() => {}));
+    fonte.addEventListener("lembrete", (e) => mostrarLembrete(JSON.parse(e.data)));
+    // Mensagem nova no WhatsApp: som e notificação, a não ser que a pessoa já esteja nela.
+    fonte.addEventListener("mensagem-nova", (e) => {
+      const d = JSON.parse(e.data);
+      const vendoEla = !document.hidden && estado.aba === "conversas" && estado.conversaAberta === d.jid;
+      if (vendoEla) return;
+      tocarSom("mensagem");
+      notificar(`Mensagem de ${d.nome}`, d.previa, `msg-${d.jid}`, () => {
+        trocarAba("conversas");
+        abrirConversa(d.jid);
+      });
+    });
   }
 
   // A caixa de entrada ocupa a altura que sobra abaixo do topo (que muda de altura no celular).
@@ -2520,7 +2823,9 @@
     try {
       const [leads, config, wa] = await Promise.all([api("GET", "/api/leads"), api("GET", "/api/config"), api("GET", "/api/whatsapp")]);
       Object.assign(estado, { leads, config, whatsapp: wa });
-      await Promise.all([carregarConversas(), carregarPedidos(), mostrarVersao()]);
+      await Promise.all([carregarConversas(), carregarPedidos(), carregarTarefas(), mostrarVersao()]);
+      const atrasadas = listaTarefas.filter((t) => situacaoTarefa(t) === "atrasada").length;
+      if (atrasadas) toast(`Você tem ${atrasadas} ${atrasadas === 1 ? "tarefa atrasada" : "tarefas atrasadas"} — veja no botão de tarefas, no topo`);
     } catch (err) {
       toast("Não foi possível carregar os leads: " + err.message, true);
     }
