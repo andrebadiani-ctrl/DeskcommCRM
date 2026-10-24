@@ -192,7 +192,10 @@
           </div>
           <div class="cv-conteudo" id="cv-conteudo" hidden>
             <header class="cv-cabecalho" id="cv-cabecalho"></header>
-            <div class="cv-mensagens" id="cv-mensagens"></div>
+            <div class="cv-mensagens-area">
+              <button type="button" class="cv-anteriores" id="cv-anteriores">↑ Carregar mensagens anteriores</button>
+              <div class="cv-mensagens" id="cv-mensagens"></div>
+            </div>
             <div class="cv-compor">
               <div class="atalhos" id="cv-atalhos"></div>
               <div class="anexo-pendente" id="cv-anexo" hidden></div>
@@ -246,6 +249,10 @@
               <span>Criar lead automaticamente quando um número novo mandar mensagem</span>
             </label>
             <p class="dica">Com o WhatsApp conectado, abra qualquer lead e use o botão <strong>WhatsApp</strong> para enviar mensagens. As mensagens recebidas aparecem no histórico do lead.</p>
+            <details class="diagnostico" id="wa-diagnostico" hidden>
+              <summary>Diagnóstico da sincronização</summary>
+              <div id="wa-diag-conteudo"></div>
+            </details>
           </div>
         </div>
       </div>

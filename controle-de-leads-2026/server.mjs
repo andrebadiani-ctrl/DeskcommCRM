@@ -65,10 +65,21 @@ whatsapp.on("conversa", (dados) => {
 
 // Toda mensagem (recebida, enviada pelo celular ou pelo CRM, ou do histórico) entra na caixa de
 // entrada. Se a conversa é de um lead, entra também no histórico dele.
-whatsapp.on("mensagem", async ({ jid, id, fromMe, telefone, nome, texto, midia, em, nova, historico }) => {
+// O WhatsApp revelou o número de um contato que estava como LID: junta as conversas e os leads.
+whatsapp.on("unificar", async ({ lid, pn }) => {
+  try {
+    const juntou = conversas.unificar(lid, pn);
+    for (const lead of store.listar()) if (lead.whatsappJid === lid) await store.atualizar(lead.id, { whatsappJid: pn });
+    if (juntou) avisarConversas();
+  } catch (e) {
+    console.error("Falha ao unificar conversa:", e);
+  }
+});
+
+whatsapp.on("mensagem", async ({ jid, jidWhatsapp, id, fromMe, telefone, nome, texto, midia, em, nova, historico }) => {
   try {
     const msg = { id, direcao: fromMe ? "saida" : "entrada", texto, em, midia };
-    const inedita = conversas.registrar(jid, { ...msg, nome, telefone }, { nova });
+    const inedita = conversas.registrar(jid, { ...msg, nome, telefone, jidWhatsapp }, { nova });
     avisarConversas();
     if (!inedita || historico) return; // histórico antigo só vai para o lead quando ele é ligado
 
@@ -485,6 +496,20 @@ app.post("/api/conversas/:jid/anexos", express.raw({ type: "application/octet-st
   if (lead) transmitir("leads", { motivo: "mensagem", id: lead.id });
   avisarConversas();
   res.json({ data: paraTela(c, lead) });
+}));
+
+// Pede ao celular mensagens mais antigas desta conversa (chegam em seguida, pela sincronização).
+app.post("/api/conversas/:jid/anteriores", assincrono(async (req, res) => {
+  const c = conversas.obter(req.params.jid);
+  if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
+  const maisAntiga = c.mensagens.find((m) => m.id);
+  if (!maisAntiga) throw new ErroValidacao("Ainda não há mensagens nesta conversa para continuar a partir delas");
+  try {
+    await whatsapp.pedirAnteriores(c.jidWhatsapp || c.jid, { id: maisAntiga.id, fromMe: maisAntiga.direcao === "saida" }, maisAntiga.em);
+  } catch (e) {
+    return res.status(409).json({ error: { message: e.message } });
+  }
+  res.status(202).json({ data: { pedido: true } });
 }));
 
 // Fixar no topo e fila de atendimento.

@@ -1,6 +1,6 @@
 // Integração com o WhatsApp (WhatsApp Web multi-device via Baileys), login por QR Code.
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { createWriteStream, existsSync, statSync, truncateSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   BufferJSON,
   DisconnectReason,
   downloadMediaMessage,
+  jidNormalizedUser,
   fetchLatestBaileysVersion,
   makeWASocket,
   useMultiFileAuthState,
@@ -17,7 +18,9 @@ import QRCode from "qrcode";
 import { ehConversaIndividual, telefoneDoJid } from "./conversas.mjs";
 import { digitos } from "./store.mjs";
 
-const logger = pino({ level: process.env.WA_LOG_LEVEL || "silent" });
+const ehPn = (jid) => String(jid || "").endsWith("@s.whatsapp.net");
+const ehLid = (jid) => String(jid || "").endsWith("@lid");
+const STUB_CIPHERTEXT = 2; // mensagem que chegou mas não pôde ser descriptografada
 
 // Mensagens temporárias / de visualização única vêm embrulhadas.
 function desembrulhar(bruta = {}) {
@@ -70,6 +73,11 @@ export class WhatsApp extends EventEmitter {
   constructor(dir) {
     super();
     this.authDir = path.join(dir, "whatsapp-auth");
+    // LID (contato com número oculto) → JID com o número. Vem dos contatos, das mensagens e do
+    // mapa que o próprio WhatsApp manda; serve para não ter a mesma pessoa em duas conversas.
+    this.lidParaPn = new Map();
+    this.diag = this.#diagZerado();
+    this.logger = this.#criarLogger(path.join(dir, "whatsapp.log"));
     this.sock = null;
     this.status = "desconectado"; // desconectado | conectando | aguardando_qr | conectado | reconectando
     this.qr = null;
@@ -80,7 +88,48 @@ export class WhatsApp extends EventEmitter {
   }
 
   estado() {
-    return { status: this.status, qr: this.qr, conta: this.conta, erro: this.erro };
+    return { status: this.status, qr: this.qr, conta: this.conta, erro: this.erro, diagnostico: this.diag };
+  }
+
+  #diagZerado() {
+    return { conectadoEm: "", lotesHistorico: 0, conversasRecebidas: 0, mensagensHistorico: 0, mensagensAoVivo: 0, semConteudo: 0, naoDescriptografadas: 0, ultimaMensagemEm: "", ultimoErro: "" };
+  }
+
+  /** Registro da biblioteca em data/whatsapp.log (avisos e erros); o último erro aparece na tela. */
+  #criarLogger(arquivo) {
+    try {
+      if (existsSync(arquivo) && statSync(arquivo).size > 5 * 1024 * 1024) truncateSync(arquivo, 0);
+    } catch {
+      /* sem permissão: segue sem truncar */
+    }
+    const saida = createWriteStream(arquivo, { flags: "a" });
+    saida.on("error", () => {});
+    const destino = {
+      write: (linha) => {
+        saida.write(linha);
+        try {
+          const j = JSON.parse(linha);
+          if (j.level >= 50) this.diag.ultimoErro = `${new Date(j.time).toLocaleString("pt-BR")}: ${String(j.msg || j.err?.message || "erro").slice(0, 200)}`;
+        } catch {
+          /* linha que não é JSON */
+        }
+      },
+    };
+    return pino({ level: process.env.WA_LOG_LEVEL || "warn" }, destino);
+  }
+
+  /** Aprende que um LID é o mesmo contato de um número; avisa para juntar as conversas. */
+  #aprender(lid, pn) {
+    if (!ehLid(lid) || !ehPn(pn)) return;
+    const numero = jidNormalizedUser(pn);
+    if (this.lidParaPn.get(lid) === numero) return;
+    this.lidParaPn.set(lid, numero);
+    this.emit("unificar", { lid, pn: numero });
+  }
+
+  /** JID da conversa: o do número quando ele é conhecido, senão o LID. */
+  #canonico(jid) {
+    return ehLid(jid) ? this.lidParaPn.get(jid) || jid : jid;
   }
 
   #mudar(campos) {
@@ -116,7 +165,7 @@ export class WhatsApp extends EventEmitter {
     const sock = makeWASocket({
       version,
       auth: state,
-      logger,
+      logger: this.logger,
       browser: Browsers.ubuntu("Controle de Leads 2026"),
       markOnlineOnConnect: false,
       syncFullHistory: false,
@@ -133,6 +182,7 @@ export class WhatsApp extends EventEmitter {
       }
       if (u.connection === "open") {
         this.tentativas = 0;
+        this.diag.conectadoEm = new Date().toISOString();
         const id = sock.user?.id || "";
         this.#mudar({
           status: "conectado",
@@ -166,6 +216,7 @@ export class WhatsApp extends EventEmitter {
         }
         this.tentativas += 1;
         const espera = Math.min(30000, 2000 * this.tentativas);
+        this.diag.ultimoErro = `${new Date().toLocaleString("pt-BR")}: conexão caiu${codigo ? ` (código ${codigo})` : ""}; reconectando`;
         this.#mudar({
           status: "reconectando",
           qr: null,
@@ -175,41 +226,71 @@ export class WhatsApp extends EventEmitter {
       }
     });
 
+    this.ligarEventos(sock);
+  }
+
+  /**
+   * Traduz os eventos da biblioteca (histórico, contatos, conversas, mensagens, mapa LID↔número)
+   * em "conversa", "mensagem" e "unificar". Separado de conectar() para poder ser testado com
+   * eventos de mentira no mesmo formato.
+   */
+  ligarEventos(sock) {
     const emData = (ts) => new Date(Number(ts || Date.now() / 1000) * 1000).toISOString();
     const avisarMensagem = (m, tipo) => {
-      const jid = m.key?.remoteJid || "";
-      if (!ehConversaIndividual(jid)) return; // grupos, status e canais ficam de fora
+      const jidOriginal = m.key?.remoteJid || "";
+      if (!ehConversaIndividual(jidOriginal)) return; // grupos, status e canais ficam de fora
+      // O WhatsApp manda o outro endereço do mesmo contato em remoteJidAlt (ou senderPn).
+      const alternativo = m.key.remoteJidAlt || m.key.senderPn || "";
+      if (ehLid(jidOriginal)) this.#aprender(jidOriginal, alternativo);
+      else if (ehLid(alternativo)) this.#aprender(alternativo, jidOriginal);
+      if (ehLid(jidOriginal) && !this.lidParaPn.has(jidOriginal)) this.#descobrirNumero(jidOriginal);
+
+      if (m.messageStubType === STUB_CIPHERTEXT) {
+        this.diag.naoDescriptografadas += 1;
+        this.logger.warn({ jid: jidOriginal, motivo: m.messageStubParameters?.[0] }, "mensagem não descriptografada");
+        return;
+      }
       const { texto, midia } = conteudoDaMensagem(m);
-      if (!texto && !midia) return;
-      // Endereçamento por LID esconde o número; quando o WhatsApp manda, ele vem em senderPn.
-      const telefone = jid.endsWith("@lid") ? digitos(String(m.key.senderPn || "").split("@")[0].split(":")[0]) : telefoneDoJid(jid);
+      if (!texto && !midia) {
+        this.diag.semConteudo += 1; // reações, edições, avisos do sistema…
+        return;
+      }
+      const jid = this.#canonico(jidOriginal);
+      if (tipo === "historico") this.diag.mensagensHistorico += 1;
+      else this.diag.mensagensAoVivo += 1;
+      this.diag.ultimaMensagemEm = new Date().toISOString();
       this.emit("mensagem", {
         jid,
+        jidWhatsapp: jidOriginal, // o endereço que o WhatsApp usa nesta conversa (para pedir histórico)
         id: m.key.id || "",
         fromMe: !!m.key.fromMe,
-        telefone,
+        telefone: telefoneDoJid(jid),
         nome: m.key.fromMe ? "" : m.pushName || "",
         texto,
         // Guarda a mensagem original (com as chaves da mídia) para baixar o arquivo quando abrirem.
         midia: midia ? { ...midia, wa: JSON.parse(JSON.stringify({ key: m.key, message: m.message }, BufferJSON.replacer)) } : null,
         em: emData(m.messageTimestamp),
         nova: tipo === "notify", // chegou agora (conta como não lida)
-        historico: tipo === "historico", // sincronização inicial: só preenche a caixa de entrada
+        historico: tipo === "historico", // sincronização: só preenche a caixa de entrada
       });
     };
     const avisarContato = (c) => {
-      const nomeContato = c.name || "";
-      const nome = c.notify || c.verifiedName || "";
-      // O mesmo contato pode ter um JID de número e um anônimo (@lid): os dois apontam para o telefone.
-      const telefone = telefoneDoJid(c.jid || "") || telefoneDoJid(c.id || "");
-      for (const jid of new Set([c.id, c.lid, c.jid].filter(Boolean))) {
-        if (ehConversaIndividual(jid)) this.emit("conversa", { jid, nome, nomeContato, telefone });
-      }
+      // v7: id (LID ou número), lid, phoneNumber. v6: id, lid, jid.
+      const pn = [c.phoneNumber, c.jid, c.id].find(ehPn);
+      const lid = [c.lid, c.id].find(ehLid);
+      if (pn && lid) this.#aprender(lid, pn);
+      const jid = pn ? jidNormalizedUser(pn) : lid;
+      if (!jid) return;
+      this.emit("conversa", { jid, nome: c.notify || c.verifiedName || "", nomeContato: c.name || "", telefone: telefoneDoJid(jid) });
     };
     const avisarChat = (c) => {
       if (!ehConversaIndividual(c.id)) return;
+      if (ehLid(c.id) && c.pnJid) this.#aprender(c.id, c.pnJid);
+      this.diag.conversasRecebidas += 1;
+      const jid = this.#canonico(c.id);
       this.emit("conversa", {
-        jid: c.id,
+        jid,
+        jidWhatsapp: c.id,
         nome: c.name || "",
         naoLidas: typeof c.unreadCount === "number" ? c.unreadCount : undefined,
         ultimaEm: c.conversationTimestamp ? emData(c.conversationTimestamp) : "",
@@ -217,7 +298,9 @@ export class WhatsApp extends EventEmitter {
     };
 
     // Ao conectar, o WhatsApp manda o histórico recente: conversas, contatos e mensagens.
+    // Contatos primeiro: eles ensinam quais LIDs são quais números.
     sock.ev.on("messaging-history.set", ({ chats, contacts, messages }) => {
+      this.diag.lotesHistorico += 1;
       (contacts || []).forEach(avisarContato);
       (chats || []).forEach(avisarChat);
       (messages || []).forEach((m) => avisarMensagem(m, "historico"));
@@ -225,6 +308,7 @@ export class WhatsApp extends EventEmitter {
     sock.ev.on("contacts.upsert", (cs) => cs.forEach(avisarContato));
     sock.ev.on("contacts.update", (cs) => cs.forEach((c) => c.id && avisarContato(c)));
     sock.ev.on("chats.upsert", (cs) => cs.forEach(avisarChat));
+    sock.ev.on("lid-mapping.update", (mapa) => [].concat(mapa || []).forEach((x) => this.#aprender(x?.lid, x?.pn)));
 
     // notify = chegou agora; append = enviada por outro aparelho / pelo próprio CRM / histórico.
     sock.ev.on("messages.upsert", ({ messages, type }) => {
@@ -265,12 +349,29 @@ export class WhatsApp extends EventEmitter {
     return this.enviar(lead.telefone, texto, lead.pais);
   }
 
+  /** Pergunta ao WhatsApp o número de um LID desconhecido (sem travar o recebimento). */
+  #descobrirNumero(lid) {
+    const mapa = this.sock?.signalRepository?.lidMapping;
+    if (!mapa?.getPNForLID) return;
+    mapa.getPNForLID(lid).then((pn) => pn && this.#aprender(lid, pn)).catch(() => {});
+  }
+
+  /**
+   * Pede ao celular mensagens mais antigas de uma conversa. Elas chegam depois, pelo mesmo
+   * caminho do histórico (messaging-history.set). `chave` = a mensagem mais antiga que já temos.
+   */
+  async pedirAnteriores(jidWhatsapp, chave, emIso) {
+    if (this.status !== "conectado" || !this.sock) throw new Error("WhatsApp não está conectado");
+    const segundos = Math.floor(new Date(emIso).getTime() / 1000);
+    await this.sock.fetchMessageHistory(50, { remoteJid: jidWhatsapp, id: chave.id, fromMe: chave.fromMe }, segundos);
+  }
+
   /** Baixa a mídia de uma mensagem guardada; devolve um stream com o arquivo. */
   async baixarMidia(wa) {
     const msg = JSON.parse(JSON.stringify(wa), BufferJSON.reviver);
     const sock = this.sock;
     // Mídia antiga some do servidor do WhatsApp; com o celular conectado ele reenvia (reupload).
-    const ctx = sock ? { reuploadRequest: sock.updateMediaMessage, logger } : undefined;
+    const ctx = sock ? { reuploadRequest: sock.updateMediaMessage, logger: this.logger } : undefined;
     return downloadMediaMessage(msg, "stream", {}, ctx);
   }
 

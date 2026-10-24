@@ -160,6 +160,24 @@ Coloque um proxy com HTTPS (Caddy, Nginx, Traefik) na frente se for expor na int
 A versão e a data dela aparecem no canto superior direito (ex.: `v1.4.0 · 24/10/2026`). Elas vêm
 dos campos `version` e `dataVersao` do `package.json`.
 
+## WhatsApp não carrega as mensagens? (passo a passo)
+
+1. Abra a aba **WhatsApp › Diagnóstico da sincronização**. Ele mostra quantas conversas e mensagens
+   o celular mandou, quantas não puderam ser lidas e o último erro.
+2. **Conversas antigas não aparecem** ("Lotes de histórico recebidos" = 0): o WhatsApp só manda o
+   histórico **na hora em que o aparelho é conectado**. Clique em **Desconectar**, gere o QR Code e
+   leia de novo. (Quem conectou numa versão antiga do sistema precisa fazer isso uma vez.)
+3. **Uma conversa mostra só as últimas mensagens**: dentro dela, use **↑ Carregar mensagens
+   anteriores** (o celular manda em lotes; precisa estar com internet).
+4. **"Mensagens que não puderam ser lidas"** aumentando sem parar: desconecte e leia o QR Code de novo.
+5. Mande o arquivo `data/whatsapp.log` para quem dá suporte — ele tem o registro técnico.
+
+Desde a versão 1.4.1 o sistema usa a Baileys 7, que entende os contatos com **número oculto
+(LID)** — o formato que o WhatsApp passou a usar em muitas conversas. A mesma pessoa não aparece mais
+em duas conversas: quando o WhatsApp revela o número, as conversas são juntadas.
+
+Para conferir a lógica sem celular: `npm test`.
+
 ## Como funciona
 
 - `server.mjs` — Express: API REST (`/api/leads`, `/api/whatsapp`, `/api/config`), eventos em tempo

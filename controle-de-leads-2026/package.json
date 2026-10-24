@@ -1,6 +1,7 @@
 {
   "name": "controle-de-leads-2026",
-  "version": "1.4.0",
+  "version": "1.4.1",
+  "dataVersao": "2026-10-24",
   "private": true,
   "description": "CRM minimalista para controle de leads (Tabela + Kanban) com integração ao WhatsApp por QR Code",
   "type": "module",
@@ -10,13 +11,13 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node --watch server.mjs"
+    "dev": "node --watch server.mjs",
+    "test": "node testes/eventos-whatsapp.mjs"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.24",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "express": "^4.22.3",
     "pino": "^10.4.0",
     "qrcode": "^1.5.4"
-  },
-  "dataVersao": "2026-10-24"
+  }
 }

@@ -75,9 +75,10 @@ export class Conversas {
   }
 
   /** Atualiza dados da conversa vindos do WhatsApp (nome, não lidas, data, telefone). */
-  atualizarDados(jid, { nome, nomeContato, telefone, naoLidas, ultimaEm } = {}) {
+  atualizarDados(jid, { nome, nomeContato, telefone, naoLidas, ultimaEm, jidWhatsapp } = {}) {
     if (!ehConversaIndividual(jid)) return;
     const c = this.#garantir(jid);
+    if (jidWhatsapp) c.jidWhatsapp = jidWhatsapp;
     if (nome) c.nome = nome;
     if (nomeContato) c.nomeContato = nomeContato;
     if (telefone && !c.telefone) c.telefone = digitos(telefone);
@@ -93,6 +94,7 @@ export class Conversas {
   registrar(jid, msg, { nova = false } = {}) {
     if (!ehConversaIndividual(jid) || (!msg.texto && !msg.midia)) return false;
     const c = this.#garantir(jid);
+    if (msg.jidWhatsapp) c.jidWhatsapp = msg.jidWhatsapp;
     const repetida = msg.id && c.mensagens.find((m) => m.id === msg.id);
     if (repetida) {
       // O eco do WhatsApp pode chegar antes de o CRM registrar o envio: junta o arquivo local.
@@ -118,6 +120,36 @@ export class Conversas {
       if (!c.fila) c.fila = { desde: msg.em };
     }
     if (msg.direcao === "saida") c.naoLidas = 0; // respondeu pelo celular ou pelo CRM
+    this.agendarSalvar();
+    return true;
+  }
+
+  /**
+   * O WhatsApp revelou que o contato com número oculto (lid) é o número pn: junta as duas
+   * conversas na do número, sem perder mensagens, fila, fixação ou não lidas.
+   */
+  unificar(lid, pn) {
+    const daLid = this.mapa.get(lid);
+    if (!daLid || lid === pn) return false;
+    const destino = this.#garantir(pn);
+    const ids = new Set(destino.mensagens.map((m) => m.id).filter(Boolean));
+    destino.mensagens = [...destino.mensagens, ...daLid.mensagens.filter((m) => !m.id || !ids.has(m.id))]
+      .sort((a, b) => a.em.localeCompare(b.em))
+      .slice(-MAX_MENSAGENS);
+    destino.nome ||= daLid.nome;
+    destino.nomeContato ||= daLid.nomeContato;
+    destino.jidWhatsapp ||= daLid.jidWhatsapp || lid;
+    destino.naoLidas = (destino.naoLidas || 0) + (daLid.naoLidas || 0);
+    destino.fixada = !!(destino.fixada || daLid.fixada);
+    if (daLid.fila && (!destino.fila || daLid.fila.desde < destino.fila.desde)) destino.fila = daLid.fila;
+    const ultima = destino.mensagens.at(-1);
+    if (ultima && ultima.em >= (destino.ultimaEm || "")) {
+      destino.ultimaEm = ultima.em;
+      destino.ultimaMensagem = (ultima.direcao === "saida" ? "Você: " : "") + previa(ultima).slice(0, 120);
+    } else if ((daLid.ultimaEm || "") > (destino.ultimaEm || "")) {
+      destino.ultimaEm = daLid.ultimaEm;
+    }
+    this.mapa.delete(lid);
     this.agendarSalvar();
     return true;
   }

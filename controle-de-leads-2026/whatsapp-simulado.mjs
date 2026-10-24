@@ -103,7 +103,7 @@ export class WhatsAppSimulado extends EventEmitter {
   }
 
   estado() {
-    return { status: this.status, qr: null, conta: this.conta, erro: null, simulado: true };
+    return { status: this.status, qr: null, conta: this.conta, erro: null, simulado: true, diagnostico: this.diag || null };
   }
 
   async iniciarSeHouverSessao() {
@@ -114,6 +114,7 @@ export class WhatsAppSimulado extends EventEmitter {
     if (this.status === "conectado") return;
     this.status = "conectado";
     this.conta = { numero: "5511900000000", nome: "Demonstração" };
+    this.diag = { conectadoEm: new Date().toISOString(), lotesHistorico: 1, conversasRecebidas: CONVERSAS.length, mensagensHistorico: 0, mensagensAoVivo: 0, semConteudo: 0, naoDescriptografadas: 0, ultimaMensagemEm: "", ultimoErro: "" };
     this.emit("estado", this.estado());
     // Igual ao WhatsApp real: depois de conectar chega o histórico recente.
     setTimeout(() => {
@@ -137,7 +138,24 @@ export class WhatsAppSimulado extends EventEmitter {
   }
 
   #mensagem(jid, { texto, midia = null, fromMe = false, nome = "", em = new Date().toISOString(), nova = false, historico = false, id = randomUUID() }) {
+    if (this.diag) {
+      if (historico) this.diag.mensagensHistorico += 1;
+      else this.diag.mensagensAoVivo += 1;
+      this.diag.ultimaMensagemEm = new Date().toISOString();
+    }
     this.emit("mensagem", { jid, id, fromMe, telefone: jid.endsWith("@s.whatsapp.net") ? digitos(jid.split("@")[0]) : "", nome, texto, midia, em, nova, historico });
+  }
+
+  // Como o WhatsApp real: o pedido sai na hora e as mensagens antigas chegam um pouco depois.
+  async pedirAnteriores(jidWhatsapp, _chave, emIso) {
+    if (this.status !== "conectado") throw new Error("WhatsApp não está conectado");
+    const nome = CONVERSAS.find((c) => c.jid === jidWhatsapp)?.nome || "";
+    const base = new Date(emIso).getTime();
+    setTimeout(() => {
+      ["Bom dia! Tudo bem?", "Vi o site de vocês ontem", "Queria tirar umas dúvidas"].forEach((texto, i) =>
+        this.#mensagem(jidWhatsapp, { texto, nome, em: new Date(base - (3 - i) * 3600_000 - 86400_000).toISOString(), historico: true }),
+      );
+    }, 800);
   }
 
   async baixarMidia(wa) {

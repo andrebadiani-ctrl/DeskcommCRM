@@ -12,11 +12,20 @@ echo.
 where node >nul 2>nul
 if errorlevel 1 goto semnode
 
-if exist node_modules\express goto senha
-echo  Instalando o sistema (so na primeira vez, pode levar 1 ou 2 minutos)...
+rem Instala na primeira vez e de novo sempre que uma atualizacao trouxer dependencias novas
+rem (o package-lock.json mudou desde a ultima instalacao).
+if not exist node_modules\express goto instalar
+if not exist node_modules\.instalado-com.json goto instalar
+fc /b package-lock.json node_modules\.instalado-com.json >nul 2>nul
+if errorlevel 1 goto instalar
+goto senha
+
+:instalar
+echo  Instalando/atualizando o sistema (pode levar 1 ou 2 minutos)...
 echo.
 call npm install --omit=dev --no-audit --no-fund
 if errorlevel 1 goto erroinstalar
+copy /y package-lock.json node_modules\.instalado-com.json >nul
 
 :senha
 if exist senha.txt goto iniciar

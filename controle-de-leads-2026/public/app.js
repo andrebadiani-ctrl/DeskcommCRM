@@ -389,8 +389,50 @@
     $("#btn-wa-desconectar").hidden = status === "desconectado";
     $("#btn-wa-desconectar").textContent = status === "conectado" ? "Desconectar" : "Cancelar";
     $("#cfg-auto").checked = !!estado.config.autoCriarLeads;
+    renderDiagnostico();
     renderAutomacao();
   }
+
+  // ---------- diagnóstico da sincronização (aba WhatsApp) ----------
+  function renderDiagnostico() {
+    const d = estado.whatsapp.diagnostico;
+    const caixa = $("#wa-diagnostico");
+    caixa.hidden = !d || estado.whatsapp.status !== "conectado";
+    if (caixa.hidden) return;
+    const quando = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—");
+    const minutosConectado = d.conectadoEm ? (Date.now() - new Date(d.conectadoEm).getTime()) / 60000 : 0;
+    const linhas = [
+      ["Conectado desde", quando(d.conectadoEm)],
+      ["Lotes de histórico recebidos do celular", d.lotesHistorico],
+      ["Conversas recebidas", d.conversasRecebidas],
+      ["Mensagens do histórico", d.mensagensHistorico],
+      ["Mensagens recebidas ao vivo", d.mensagensAoVivo],
+      ["Mensagens que não puderam ser lidas (criptografia)", d.naoDescriptografadas],
+      ["Última mensagem recebida", quando(d.ultimaMensagemEm)],
+      ["Último erro", d.ultimoErro || "nenhum"],
+    ];
+    const avisos = [];
+    if (!d.lotesHistorico && minutosConectado > 2) {
+      avisos.push("O celular não mandou o histórico de conversas. Ele só faz isso quando o aparelho é <strong>conectado pela primeira vez</strong>: para receber as conversas antigas, clique em <strong>Desconectar</strong> e leia o QR Code de novo.");
+    }
+    if (d.naoDescriptografadas) {
+      avisos.push("Algumas mensagens chegaram mas não puderam ser lidas. Normalmente se resolve sozinho em poucos minutos; se continuar, desconecte e leia o QR Code de novo.");
+    }
+    $("#wa-diag-conteudo").innerHTML =
+      `<dl>${linhas.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("")}</dl>` +
+      avisos.map((a) => `<p class="diag-aviso">${a}</p>`).join("") +
+      `<p class="dica">O registro detalhado fica no arquivo <code>data/whatsapp.log</code>.</p>`;
+  }
+  // Os números mudam sem aviso (a cada mensagem): atualiza enquanto a aba WhatsApp está aberta.
+  setInterval(async () => {
+    if (estado.aba !== "whatsapp" || estado.whatsapp.status !== "conectado" || document.hidden) return;
+    try {
+      estado.whatsapp = await api("GET", "/api/whatsapp");
+      renderDiagnostico();
+    } catch {
+      /* tenta de novo no próximo ciclo */
+    }
+  }, 5000);
 
   // ---------- dados ----------
   async function carregarLeads() {
@@ -1387,6 +1429,7 @@
 
   function renderAvisoConversa() {
     const conectado = estado.whatsapp.status === "conectado";
+    $("#cv-anteriores").hidden = !conectado || !(estado.conversaDados?.mensagens || []).some((m) => m.id);
     $("#cv-enviar").disabled = !conectado;
     $("#cv-aviso").innerHTML = conectado ? "" : `WhatsApp desconectado. <a href="#" data-ir-aba="whatsapp">Conecte pelo QR Code</a> para responder.`;
   }
@@ -1403,6 +1446,27 @@
       renderAvisoConversa();
     }
   }
+
+  // ---- mensagens anteriores: o celular manda em lotes, pelo mesmo caminho do histórico ----
+  $("#cv-anteriores").addEventListener("click", async (e) => {
+    const botao = e.currentTarget;
+    const jid = estado.conversaAberta;
+    botao.disabled = true;
+    botao.textContent = "Pedindo ao celular…";
+    try {
+      await api("POST", `/api/conversas/${jidUrl(jid)}/anteriores`);
+      toast("Pedido enviado ao celular — as mensagens antigas aparecem em instantes");
+      botao.textContent = "Aguardando o celular…";
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      // O celular pode demorar ou não ter mais nada: libera o botão depois de um tempo.
+      setTimeout(() => {
+        botao.disabled = false;
+        botao.textContent = "↑ Carregar mensagens anteriores";
+      }, 8000);
+    }
+  });
 
   async function abrirConversa(jid, { rolar = true } = {}) {
     try {

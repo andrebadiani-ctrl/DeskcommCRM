@@ -11,9 +11,12 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -d node_modules/express ]; then
-  echo "  Instalando o sistema (só na primeira vez)..."
+# Instala na primeira vez e de novo sempre que uma atualização trouxer dependências novas
+# (o package-lock.json mudou desde a última instalação).
+if [ ! -d node_modules/express ] || ! cmp -s package-lock.json node_modules/.instalado-com.json; then
+  echo "  Instalando/atualizando o sistema (pode levar 1 ou 2 minutos)..."
   npm install --omit=dev --no-audit --no-fund || { echo "  Não foi possível instalar. Confira a internet."; exit 1; }
+  cp package-lock.json node_modules/.instalado-com.json
 fi
 
 if [ ! -s senha.txt ]; then
