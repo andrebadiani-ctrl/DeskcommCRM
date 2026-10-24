@@ -59,6 +59,7 @@
     </nav>
   </header>
 
+  <div class="emoji-painel" id="emoji-painel" role="dialog" aria-label="Emojis" hidden></div>
   <main>
     <section class="kpis" id="kpis" aria-label="Indicadores"></section>
 
@@ -228,16 +229,26 @@
             </div>
             <div class="cv-compor">
               <div class="atalhos" id="cv-atalhos"></div>
+              <div class="cv-citando" id="cv-citando" hidden></div>
               <div class="anexo-pendente" id="cv-anexo" hidden></div>
-              <div class="enviar">
+              <div class="gravando" id="cv-gravando" hidden>
+                <button type="button" class="icone-btn del" id="cv-gravar-cancelar" title="Descartar gravação" aria-label="Descartar gravação"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg></button>
+                <span class="gravando-ponto" aria-hidden="true"></span>
+                <span class="gravando-tempo" id="cv-gravar-tempo" aria-live="off">0:00</span>
+                <span class="gravando-onda" id="cv-gravar-onda" aria-hidden="true"></span>
+                <button type="button" class="btn btn-primario" id="cv-gravar-enviar">Enviar áudio</button>
+              </div>
+              <div class="enviar" id="cv-enviar-linha">
                 <div class="campo-com-sugestoes">
                   <textarea id="cv-texto" rows="2" placeholder="Escreva uma mensagem… (digite / para respostas rápidas)" maxlength="4000"></textarea>
+                  <button type="button" class="botao-emoji" data-emoji-para="cv-texto" title="Emojis" aria-label="Inserir emoji" aria-haspopup="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.6" /></svg></button>
                   <div class="sugestoes" id="cv-sugestoes" role="listbox" hidden></div>
                 </div>
                 <label class="icone-btn anexar" title="Anexar foto, vídeo, áudio ou documento">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></svg>
                   <input type="file" id="cv-arquivo" hidden />
                 </label>
+                <button type="button" class="icone-btn microfone" id="cv-gravar" title="Gravar mensagem de voz" aria-label="Gravar mensagem de voz"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg></button>
                 <button type="button" class="btn btn-primario" id="cv-enviar">Enviar</button>
               </div>
               <p class="dica" id="cv-aviso"></p>
@@ -422,6 +433,7 @@
           <div class="enviar">
             <div class="campo-com-sugestoes">
               <textarea id="wa-texto" rows="2" placeholder="Escreva uma mensagem… (digite / para respostas rápidas)" maxlength="4000"></textarea>
+              <button type="button" class="botao-emoji" data-emoji-para="wa-texto" title="Emojis" aria-label="Inserir emoji" aria-haspopup="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.6" /></svg></button>
               <div class="sugestoes" id="sugestoes" role="listbox" hidden></div>
             </div>
             <button type="button" class="btn btn-primario" id="btn-wa-enviar">Enviar</button>

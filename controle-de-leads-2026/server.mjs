@@ -12,6 +12,7 @@ import { Conversas, previa } from "./conversas.mjs";
 import { ErroValidacao, Store, chaveTelefone } from "./store.mjs";
 import { Followups } from "./followups.mjs";
 import { LIMITE_IMPORTACAO, normalizarLinha } from "./importacao.mjs";
+import { duracaoOgg, webmParaOgg } from "./audio-voz.mjs";
 import { paginaDoPedido } from "./impressao.mjs";
 import { resumoDoPainel } from "./painel.mjs";
 import { Pedidos, STATUS_PEDIDO, STATUS_VENDA, resumoPagamento } from "./pedidos.mjs";
@@ -85,9 +86,9 @@ whatsapp.on("unificar", async ({ lid, pn }) => {
   }
 });
 
-whatsapp.on("mensagem", async ({ jid, jidWhatsapp, id, fromMe, telefone, nome, texto, midia, em, nova, historico }) => {
+whatsapp.on("mensagem", async ({ jid, jidWhatsapp, id, fromMe, telefone, nome, texto, citacao, midia, em, nova, historico }) => {
   try {
-    const msg = { id, direcao: fromMe ? "saida" : "entrada", texto, em, midia };
+    const msg = { id, direcao: fromMe ? "saida" : "entrada", texto, em, midia, ...(citacao ? { citacao } : {}) };
     const inedita = conversas.registrar(jid, { ...msg, nome, telefone, jidWhatsapp }, { nova });
     avisarConversas();
     if (!inedita || historico) return; // histórico antigo só vai para o lead quando ele é ligado
@@ -477,13 +478,14 @@ app.post("/api/conversas/:jid/mensagens", assincrono(async (req, res) => {
   if (!c) return res.status(404).json({ error: { message: "Conversa não encontrada" } });
   const texto = String(req.body?.texto || "").trim().slice(0, 4000);
   if (!texto) throw new ErroValidacao("Mensagem vazia");
+  const { citar, citacao } = citacaoPara(c, req.body?.citarId);
   let enviada;
   try {
-    enviada = await whatsapp.enviarParaJid(c.jid, texto);
+    enviada = await whatsapp.enviarParaJid(c.jid, texto, { citar });
   } catch (e) {
     return res.status(409).json({ error: { message: e.message } });
   }
-  const msg = { id: enviada.id, direcao: "saida", texto, em: enviada.em };
+  const msg = { id: enviada.id, direcao: "saida", texto, em: enviada.em, ...(citacao ? { citacao } : {}) };
   conversas.registrar(c.jid, msg);
   const lead = leadDaConversa(c.jid, c.telefone);
   if (lead) {
@@ -493,6 +495,21 @@ app.post("/api/conversas/:jid/mensagens", assincrono(async (req, res) => {
   avisarConversas();
   res.json({ data: paraTela(c, lead) });
 }));
+
+/**
+ * "Responder" uma mensagem: acha a original na conversa e devolve o que o WhatsApp precisa para
+ * citá-la (`citar`) e o resumo que fica guardado com a resposta (`citacao`).
+ */
+function citacaoPara(c, citarId) {
+  if (!citarId) return {};
+  const original = c.mensagens.find((m) => m.id && m.id === String(citarId));
+  if (!original) throw new ErroValidacao("A mensagem que você quer responder não está mais nesta conversa");
+  const resumo = previa(original).slice(0, 300) || "Mensagem";
+  return {
+    citar: { id: original.id, fromMe: original.direcao === "saida", texto: original.texto || resumo, jidWhatsapp: c.jidWhatsapp || c.jid, wa: original.midia?.wa?.key ? original.midia.wa : undefined },
+    citacao: { id: original.id, texto: resumo },
+  };
+}
 
 // ---- mídia: fotos, vídeos, áudios e documentos ----
 const PASTA_MIDIA = path.join(DADOS, "midia");
@@ -577,22 +594,44 @@ app.post("/api/conversas/:jid/anexos", express.raw({ type: "application/octet-st
   };
   const mimetype = decodificar(req.get("x-tipo-arquivo")).split(";")[0].trim().toLowerCase() || "application/octet-stream";
   if (!/^[\w.+-]+\/[\w.+-]+$/.test(mimetype)) throw new ErroValidacao("Tipo de arquivo inválido");
-  const nome = nomeDeArquivoSeguro(decodificar(req.get("x-nome-arquivo")));
+  let nome = nomeDeArquivoSeguro(decodificar(req.get("x-nome-arquivo")));
   const legenda = decodificar(req.get("x-legenda")).trim().slice(0, 1000);
-  const extensao = EXTENSOES[mimetype] || path.extname(nome).slice(1).replace(/[^\w]/g, "").slice(0, 8) || "bin";
+  const { citar, citacao } = citacaoPara(c, decodificar(req.get("x-citar")));
+  // Mensagem de voz gravada na tela: vai como áudio de voz (Ogg Opus), não como arquivo.
+  const voz = req.get("x-voz") === "1";
+  let corpo = req.body;
+  let tipoFinal = mimetype;
+  let segundos = 0;
+  let onda;
+  if (voz) {
+    try {
+      if (mimetype === "audio/webm") ({ ogg: corpo, segundos } = webmParaOgg(req.body));
+      else if (mimetype === "audio/ogg") segundos = duracaoOgg(req.body);
+      else throw new Error("Formato de gravação não suportado");
+    } catch (e) {
+      throw new ErroValidacao(`Não deu para preparar o áudio: ${e.message}`);
+    }
+    if (segundos < 0.3) throw new ErroValidacao("Áudio curto demais");
+    tipoFinal = "audio/ogg";
+    nome = nome.replace(/\.[^.]*$/, "") + ".ogg";
+    const valores = Buffer.from(decodificar(req.get("x-onda")), "base64");
+    if (valores.length === 64) onda = new Uint8Array(valores.map((v) => Math.min(v, 100)));
+  }
+  const extensao = EXTENSOES[tipoFinal] || path.extname(nome).slice(1).replace(/[^\w]/g, "").slice(0, 8) || "bin";
   const arquivo = `envio-${randomUUID()}.${extensao}`;
   const caminho = path.join(PASTA_MIDIA, arquivo);
-  await writeFile(caminho, req.body);
+  await writeFile(caminho, corpo);
   let enviada;
   try {
-    enviada = await whatsapp.enviarMidiaParaJid(c.jid, { caminho, mimetype, nome, legenda });
+    enviada = await whatsapp.enviarMidiaParaJid(c.jid, { caminho, mimetype: tipoFinal, nome, legenda, voz, segundos, onda, citar });
   } catch (e) {
     await unlink(caminho).catch(() => {});
     return res.status(409).json({ error: { message: e.message } });
   }
   // O WhatsApp não mostra legenda em áudio: nesse caso ela segue como mensagem de texto.
   const legendaSeparada = enviada.tipo === "audio" && legenda;
-  const msgs = [{ id: enviada.id, direcao: "saida", texto: legendaSeparada ? "" : legenda, em: enviada.em, midia: { tipo: enviada.tipo, mimetype, nome, tamanho: req.body.length, arquivo } }];
+  const midia = { tipo: enviada.tipo, mimetype: tipoFinal, nome, tamanho: corpo.length, arquivo, ...(voz ? { ptt: true, segundos: Math.round(segundos) } : {}) };
+  const msgs = [{ id: enviada.id, direcao: "saida", texto: legendaSeparada ? "" : legenda, em: enviada.em, midia, ...(citacao ? { citacao } : {}) }];
   if (legendaSeparada) {
     const texto = await whatsapp.enviarParaJid(c.jid, legenda).catch(() => null);
     if (texto) msgs.push({ id: texto.id, direcao: "saida", texto: legenda, em: texto.em });

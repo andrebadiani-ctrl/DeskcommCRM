@@ -97,15 +97,27 @@ export class Conversas {
     if (msg.jidWhatsapp) c.jidWhatsapp = msg.jidWhatsapp;
     const repetida = msg.id && c.mensagens.find((m) => m.id === msg.id);
     if (repetida) {
-      // O eco do WhatsApp pode chegar antes de o CRM registrar o envio: junta o arquivo local.
-      if (msg.midia?.arquivo && repetida.midia && !repetida.midia.arquivo) {
-        repetida.midia.arquivo = msg.midia.arquivo;
-        this.agendarSalvar();
+      // O eco do WhatsApp pode chegar antes de o CRM registrar o envio: completa o que faltar
+      // (arquivo local, tamanho, duração, nome) e a citação.
+      let mudou = false;
+      if (msg.midia && repetida.midia) {
+        for (const campo of ["arquivo", "tamanho", "segundos", "nome", "ptt"]) {
+          if (msg.midia[campo] && !repetida.midia[campo]) {
+            repetida.midia[campo] = msg.midia[campo];
+            mudou = true;
+          }
+        }
       }
+      if (msg.citacao?.id && !repetida.citacao) {
+        repetida.citacao = { id: String(msg.citacao.id).slice(0, 100), texto: String(msg.citacao.texto || "").slice(0, 300) };
+        mudou = true;
+      }
+      if (mudou) this.agendarSalvar();
       return false;
     }
     const nova_ = { id: msg.id || "", direcao: msg.direcao, texto: msg.texto || "", em: msg.em };
     if (msg.midia) nova_.midia = msg.midia;
+    if (msg.citacao?.id) nova_.citacao = { id: String(msg.citacao.id).slice(0, 100), texto: String(msg.citacao.texto || "").slice(0, 300) };
     c.mensagens.push(nova_);
     c.mensagens.sort((a, b) => a.em.localeCompare(b.em));
     if (c.mensagens.length > MAX_MENSAGENS) c.mensagens = c.mensagens.slice(-MAX_MENSAGENS);

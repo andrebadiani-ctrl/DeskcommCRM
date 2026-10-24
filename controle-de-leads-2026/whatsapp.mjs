@@ -41,9 +41,27 @@ function desembrulhar(bruta = {}) {
 
 const numero = (v) => Number(v?.toString?.() ?? v ?? 0) || 0; // fileLength pode vir como Long
 
+const ROTULO_MIDIA = { imagem: "📷 Foto", video: "🎥 Vídeo", audio: "🎤 Áudio", documento: "📄 Documento", figurinha: "Figurinha" };
+
+/** Mensagem respondida (citada): o id dela e um resumo para mostrar acima do balão. */
+function citacaoDa(msg) {
+  const tipo = Object.keys(msg).find((k) => msg[k]?.contextInfo?.stanzaId);
+  const ctx = tipo && msg[tipo].contextInfo;
+  if (!ctx) return null;
+  const citada = ctx.quotedMessage ? conteudoDaMensagem({ message: ctx.quotedMessage }) : { texto: "", midia: null };
+  const texto = citada.texto || (citada.midia ? ROTULO_MIDIA[citada.midia.tipo] : "") || "Mensagem";
+  return { id: String(ctx.stanzaId).slice(0, 100), texto: texto.slice(0, 300) };
+}
+
 /** Texto e, se houver, a mídia (foto, vídeo, áudio, documento, figurinha) de uma mensagem. */
 function conteudoDaMensagem(m) {
   const msg = desembrulhar(m.message || {});
+  const citacao = citacaoDa(msg);
+  const r = conteudoSemCitacao(msg);
+  return citacao ? { ...r, citacao } : r;
+}
+
+function conteudoSemCitacao(msg) {
   const midia = (tipo, c, extra = {}) => ({
     tipo,
     mimetype: String(c.mimetype || "").split(";")[0].trim(),
@@ -302,7 +320,7 @@ export class WhatsApp extends EventEmitter {
         this.diag.naoDescriptografadas -= 1;
         this.diag.recuperadas += 1;
       }
-      const { texto, midia } = conteudoDaMensagem(m);
+      const { texto, midia, citacao } = conteudoDaMensagem(m);
       if (!texto && !midia) {
         this.diag.semConteudo += 1; // reações, edições, avisos do sistema…
         return;
@@ -319,6 +337,7 @@ export class WhatsApp extends EventEmitter {
         telefone: telefoneDoJid(jid),
         nome: m.key.fromMe ? "" : m.pushName || "",
         texto,
+        citacao: citacao || null,
         // Guarda a mensagem original (com as chaves da mídia) para baixar o arquivo quando abrirem.
         midia: midia ? { ...midia, wa: JSON.parse(JSON.stringify({ key: m.key, message: m.message }, BufferJSON.replacer)) } : null,
         em: emData(m.messageTimestamp),
@@ -427,26 +446,42 @@ export class WhatsApp extends EventEmitter {
     return downloadMediaMessage(msg, "stream", {}, ctx);
   }
 
-  /** Envia um arquivo (foto, vídeo, áudio ou documento) para uma conversa. */
-  async enviarMidiaParaJid(jid, { caminho, mimetype, nome, legenda }) {
+  /**
+   * Envia um arquivo (foto, vídeo, áudio ou documento) para uma conversa. `voz` = gravado no
+   * CRM (Ogg Opus): chega como mensagem de voz, com duração e forma de onda (`onda`, 64 valores 0–100).
+   */
+  async enviarMidiaParaJid(jid, { caminho, mimetype, nome, legenda, voz = false, segundos, onda, citar }) {
     if (this.status !== "conectado" || !this.sock) throw new Error("WhatsApp não está conectado");
     if (!ehConversaIndividual(jid)) throw new Error("Conversa inválida");
-    const tipo = tipoDeEnvio(mimetype);
+    const tipo = voz ? "audio" : tipoDeEnvio(mimetype);
     const arquivo = { url: caminho };
     const conteudo =
-      tipo === "imagem" ? { image: arquivo, caption: legenda || undefined }
+      voz ? { audio: arquivo, mimetype: "audio/ogg; codecs=opus", ptt: true, seconds: Math.round(segundos) || undefined, waveform: onda || undefined }
+      : tipo === "imagem" ? { image: arquivo, caption: legenda || undefined }
       : tipo === "video" ? { video: arquivo, caption: legenda || undefined, mimetype }
       : tipo === "audio" ? { audio: arquivo, mimetype }
       : { document: arquivo, mimetype: mimetype || "application/octet-stream", fileName: nome || "arquivo", caption: legenda || undefined };
-    const enviada = await this.sock.sendMessage(jid, conteudo);
+    const enviada = await this.sock.sendMessage(jid, conteudo, this.#opcoesCitacao(jid, citar));
     return { jid, id: enviada?.key?.id || "", em: new Date().toISOString(), tipo };
   }
 
-  /** Envia direto para uma conversa (serve também para contatos anônimos @lid). */
-  async enviarParaJid(jid, texto) {
+  /** Envia direto para uma conversa (serve também para contatos anônimos @lid). `citar` = responder a uma mensagem. */
+  async enviarParaJid(jid, texto, { citar } = {}) {
     if (this.status !== "conectado" || !this.sock) throw new Error("WhatsApp não está conectado");
     if (!ehConversaIndividual(jid)) throw new Error("Conversa inválida");
-    const enviada = await this.sock.sendMessage(jid, { text: texto });
+    const enviada = await this.sock.sendMessage(jid, { text: texto }, this.#opcoesCitacao(jid, citar));
     return { jid, id: enviada?.key?.id || "", em: new Date().toISOString() };
+  }
+
+  /**
+   * Monta a mensagem citada que a biblioteca pede. Com a original guardada (mídia), usa ela;
+   * senão basta a chave (id, conversa, quem enviou) e o texto — é o que o celular mostra no balão.
+   * `citar` = { id, fromMe, texto, jidWhatsapp, wa }.
+   */
+  #opcoesCitacao(jid, citar) {
+    if (!citar?.id) return undefined;
+    if (citar.wa) return { quoted: JSON.parse(JSON.stringify(citar.wa), BufferJSON.reviver) };
+    const remoteJid = citar.jidWhatsapp || jid;
+    return { quoted: { key: { remoteJid, id: citar.id, fromMe: !!citar.fromMe }, message: { conversation: citar.texto || " " } } };
   }
 }

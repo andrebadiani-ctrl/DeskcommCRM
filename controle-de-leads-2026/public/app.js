@@ -123,8 +123,22 @@
     </div>`;
   }
 
-  /** Conteúdo de um balão: mídia (se houver) + texto/legenda. */
-  const conteudoDaMensagem = (m) => (m.midia ? htmlMidia(m) : "") + (m.texto ? `<span class="msg-texto">${esc(m.texto)}</span>` : "");
+  /**
+   * Mensagem respondida, mostrada acima do balão. `lista` = as mensagens da conversa (para saber
+   * quem escreveu a original e poder pular até ela); `nomeOutro` = nome do contato.
+   */
+  function htmlCitacao(c, lista, nomeOutro) {
+    const original = (lista || []).find((x) => x.id && x.id === c.id);
+    const deMim = original?.direcao === "saida";
+    const autor = original ? (deMim ? "Você" : nomeOutro || "Contato") : "";
+    return `<button type="button" class="msg-citacao${deMim ? " de-mim" : ""}" data-ir-msg="${esc(c.id)}"${original ? "" : ` title="A mensagem original não está carregada"`}>${autor ? `<b>${esc(autor)}</b>` : ""}<span>${esc(c.texto || "Mensagem")}</span></button>`;
+  }
+
+  /** Conteúdo de um balão: citação (se respondeu a algo) + mídia + texto/legenda. */
+  const conteudoDaMensagem = (m, lista, nomeOutro) =>
+    (m.citacao?.id ? htmlCitacao(m.citacao, lista, nomeOutro) : "") +
+    (m.midia ? htmlMidia(m) : "") +
+    (m.texto ? `<span class="msg-texto">${esc(m.texto)}</span>` : "");
 
   // Mídia que não carregou (WhatsApp desconectado, arquivo expirado…): explica e deixa tentar de novo.
   document.addEventListener("error", (e) => {
@@ -708,7 +722,7 @@
     const pertoDoFim = caixa.scrollHeight - caixa.scrollTop - caixa.clientHeight < 80;
     const mudouDeLead = caixa._chave !== lead.id;
     renderBaloes(caixa, lead.id, lead.mensagens || [], (lista) =>
-      lista.map((m) => `<div class="${classeBalao(m)}">${conteudoDaMensagem(m)}<time>${new Date(m.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time></div>`).join(""),
+      lista.map((m) => `<div class="${classeBalao(m)}" data-msg="${esc(m.id || "")}">${conteudoDaMensagem(m, lead.mensagens, lead.nome)}<time>${new Date(m.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time></div>`).join(""),
       `<div class="sem-msg">Nenhuma mensagem trocada com este lead ainda.</div>`);
     if (mudouDeLead || pertoDoFim) caixa.scrollTop = caixa.scrollHeight;
     atualizarAvisoWhatsApp(lead);
@@ -1458,7 +1472,8 @@
       return lista.map((m) => {
         const rotulo = rotuloDoDia(m);
         const separador = rotulo !== dia ? `<div class="cv-dia"><span>${esc((dia = rotulo))}</span></div>` : "";
-        return `${separador}<div class="${classeBalao(m)}">${conteudoDaMensagem(m)}<time>${new Date(m.em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time></div>`;
+        const responder = m.id ? `<button type="button" class="msg-responder" data-responder="${esc(m.id)}" title="Responder" aria-label="Responder esta mensagem"><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5" /><path d="M4 12h10a6 6 0 0 1 6 6v1" /></svg></button>` : "";
+        return `${separador}<div class="${classeBalao(m)}" data-msg="${esc(m.id || "")}">${responder}${conteudoDaMensagem(m, estado.conversaDados.mensagens, nomeConversa(estado.conversaDados))}<time>${new Date(m.em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time></div>`;
       }).join("");
     }, `<div class="sem-msg">Sem mensagens nesta conversa ainda.</div>`);
     if (rolar || pertoDoFim) caixa.scrollTop = caixa.scrollHeight;
@@ -1517,6 +1532,8 @@
     if (mudou) {
       $("#cv-texto").value = "";
       limparAnexo();
+      pararDeResponder();
+      cancelarGravacao();
       compositorConversa.renderAtalhos();
     }
     renderConversas();
@@ -1581,7 +1598,51 @@
     escolherAnexo(e.dataTransfer.files[0]);
   });
 
-  async function enviarAnexo(arquivo, legenda) {
+  // ---- responder citando: ↩ no balão; a próxima mensagem (texto, anexo ou áudio) vai como resposta ----
+  let respondendo = null; // { id, autor, texto }
+  function responderA(id) {
+    const m = (estado.conversaDados?.mensagens || []).find((x) => x.id === id);
+    if (!m) return;
+    const resumo = m.texto || (m.midia ? { imagem: "📷 Foto", video: "🎥 Vídeo", audio: "🎤 Áudio", documento: `📄 ${m.midia.nome || "Documento"}`, figurinha: "Figurinha" }[m.midia.tipo] : "") || "Mensagem";
+    respondendo = { id, autor: m.direcao === "saida" ? "Você" : nomeConversa(estado.conversaDados), texto: resumo };
+    renderCitando();
+    $("#cv-texto").focus();
+  }
+  function pararDeResponder() {
+    respondendo = null;
+    renderCitando();
+  }
+  function renderCitando() {
+    const caixa = $("#cv-citando");
+    caixa.hidden = !respondendo;
+    caixa.innerHTML = respondendo
+      ? `<div><b>Respondendo a ${esc(respondendo.autor)}</b><span>${esc(respondendo.texto)}</span></div>
+        <button type="button" class="icone-btn" id="cv-citando-cancelar" aria-label="Não responder a esta mensagem"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>`
+      : "";
+  }
+  $("#cv-citando").addEventListener("click", (e) => e.target.closest("#cv-citando-cancelar") && pararDeResponder());
+
+  /** Pula até a mensagem citada e a destaca por um instante. */
+  function irParaMensagem(caixa, id) {
+    const alvo = [...caixa.querySelectorAll("[data-msg]")].find((el) => el.dataset.msg === id);
+    if (!alvo) return toast("A mensagem original é mais antiga e não está carregada aqui", true);
+    alvo.scrollIntoView({ behavior: "smooth", block: "center" });
+    alvo.classList.remove("destacada");
+    void alvo.offsetWidth; // reinicia a animação
+    alvo.classList.add("destacada");
+  }
+  $("#cv-mensagens").addEventListener("click", (e) => {
+    const r = e.target.closest("[data-responder]");
+    if (r) return responderA(r.dataset.responder);
+    const c = e.target.closest("[data-ir-msg]");
+    if (c) irParaMensagem($("#cv-mensagens"), c.dataset.irMsg);
+  });
+  $("#mensagens").addEventListener("click", (e) => {
+    const c = e.target.closest("[data-ir-msg]");
+    if (c) irParaMensagem($("#mensagens"), c.dataset.irMsg);
+  });
+
+  async function enviarAnexo(arquivo, legenda, extras = {}) {
     const res = await fetch(`/api/conversas/${jidUrl(estado.conversaAberta)}/anexos`, {
       method: "POST",
       headers: {
@@ -1589,6 +1650,8 @@
         "X-Tipo-Arquivo": encodeURIComponent(arquivo.type || "application/octet-stream"),
         "X-Nome-Arquivo": encodeURIComponent(arquivo.name || "arquivo"),
         "X-Legenda": encodeURIComponent(legenda),
+        ...(respondendo ? { "X-Citar": encodeURIComponent(respondendo.id) } : {}),
+        ...extras,
       },
       body: arquivo,
     });
@@ -1610,9 +1673,10 @@
         estado.conversaDados = await enviarAnexo(anexoPendente, texto);
         limparAnexo();
       } else {
-        estado.conversaDados = await api("POST", `/api/conversas/${jidUrl(estado.conversaAberta)}/mensagens`, { texto });
+        estado.conversaDados = await api("POST", `/api/conversas/${jidUrl(estado.conversaAberta)}/mensagens`, { texto, ...(respondendo ? { citarId: respondendo.id } : {}) });
       }
       campo.value = "";
+      pararDeResponder();
       renderMensagensConversa({ rolar: true });
     } catch (err) {
       toast(err.message, true);
@@ -1633,6 +1697,192 @@
     enviar: enviarNaConversa,
   });
   $("#cv-enviar").addEventListener("click", enviarNaConversa);
+
+  // ---- gravar mensagem de voz (chega no celular como áudio de voz, com a forma de onda) ----
+  const LIMITE_GRAVACAO_S = 5 * 60;
+  const gravacao = { recorder: null, stream: null, partes: [], inicio: 0, timer: null, ctx: null, medir: () => 0, niveis: [] };
+  const tempoGravado = () => (gravacao.inicio ? (Date.now() - gravacao.inicio) / 1000 : 0);
+
+  async function iniciarGravacao() {
+    if (!estado.conversaAberta || gravacao.recorder) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      return toast(window.isSecureContext
+        ? "Este navegador não consegue gravar áudio. Use o Chrome, o Edge ou o Firefox."
+        : "O navegador só libera o microfone em conexão segura: abra pelo endereço https (veja \"Acesso de fora da rede\" no README) ou, neste computador, por http://localhost.", true);
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (e) {
+      return toast(e.name === "NotAllowedError" ? "Permita o uso do microfone no navegador para gravar." : "Nenhum microfone encontrado.", true);
+    }
+    // Ogg (Firefox) já é o formato do WhatsApp; WebM (Chrome/Edge) o servidor converte sem perda.
+    const tipo = ["audio/ogg;codecs=opus", "audio/webm;codecs=opus"].find((t) => MediaRecorder.isTypeSupported(t));
+    const rec = new MediaRecorder(stream, tipo ? { mimeType: tipo, audioBitsPerSecond: 32000 } : undefined);
+    Object.assign(gravacao, { recorder: rec, stream, partes: [], inicio: Date.now(), niveis: [] });
+    rec.ondataavailable = (e) => e.data.size && gravacao.partes.push(e.data);
+    rec.start(250);
+    try {
+      const ctx = new AudioContext();
+      const analisador = ctx.createAnalyser();
+      analisador.fftSize = 1024;
+      ctx.createMediaStreamSource(stream).connect(analisador);
+      const amostras = new Uint8Array(analisador.fftSize);
+      gravacao.ctx = ctx;
+      gravacao.medir = () => {
+        analisador.getByteTimeDomainData(amostras);
+        let soma = 0;
+        for (const v of amostras) soma += ((v - 128) / 128) ** 2;
+        return Math.sqrt(soma / amostras.length);
+      };
+    } catch {
+      gravacao.medir = () => 0;
+    }
+    $("#cv-enviar-linha").hidden = true;
+    $("#cv-gravando").hidden = false;
+    $("#cv-gravar-onda").innerHTML = "";
+    gravacao.timer = setInterval(tickGravacao, 100);
+    tickGravacao();
+  }
+
+  function tickGravacao() {
+    const s = tempoGravado();
+    const nivel = Math.min(1, gravacao.medir() * 4);
+    gravacao.niveis.push(nivel);
+    $("#cv-gravar-tempo").textContent = `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+    const onda = $("#cv-gravar-onda");
+    onda.insertAdjacentHTML("beforeend", `<i style="height:${Math.max(8, nivel * 100)}%"></i>`);
+    while (onda.childElementCount > 60) onda.firstElementChild.remove();
+    if (s >= LIMITE_GRAVACAO_S) enviarGravacao(); // limite: envia o que gravou
+  }
+
+  function liberarGravacao() {
+    clearInterval(gravacao.timer);
+    gravacao.stream?.getTracks().forEach((t) => t.stop());
+    gravacao.ctx?.close().catch(() => {});
+    Object.assign(gravacao, { recorder: null, stream: null, timer: null, ctx: null, inicio: 0, medir: () => 0 });
+    $("#cv-gravando").hidden = true;
+    $("#cv-enviar-linha").hidden = false;
+  }
+
+  function cancelarGravacao() {
+    const rec = gravacao.recorder;
+    if (!rec) return;
+    rec.ondataavailable = null;
+    if (rec.state !== "inactive") rec.stop();
+    liberarGravacao();
+  }
+
+  /** 64 valores de 0 a 100: o desenho do áudio que o WhatsApp mostra no balão. */
+  function formaDeOnda(niveis) {
+    const n = niveis.length || 1;
+    const blocos = Array.from({ length: 64 }, (_, i) => {
+      const fatia = niveis.slice(Math.floor((i * n) / 64), Math.max(Math.floor(((i + 1) * n) / 64), Math.floor((i * n) / 64) + 1));
+      return fatia.reduce((a, b) => a + b, 0) / (fatia.length || 1);
+    });
+    const maior = Math.max(...blocos, 0.01);
+    return btoa(String.fromCharCode(...blocos.map((v) => Math.round((v / maior) * 100))));
+  }
+
+  async function enviarGravacao() {
+    const rec = gravacao.recorder;
+    if (!rec) return;
+    const segundos = tempoGravado();
+    const niveis = gravacao.niveis;
+    const blob = await new Promise((resolver) => {
+      rec.onstop = () => resolver(new Blob(gravacao.partes, { type: rec.mimeType || "audio/webm" }));
+      if (rec.state !== "inactive") rec.stop();
+      else rec.onstop();
+    });
+    liberarGravacao();
+    if (segundos < 1 || !blob.size) return toast("Gravação curta demais: segure por pelo menos 1 segundo.", true);
+    const tipo = (blob.type || "audio/webm").split(";")[0];
+    // Safari grava em MP4: vai como arquivo de áudio comum (o WhatsApp toca, mas não como "voz").
+    const voz = tipo === "audio/webm" || tipo === "audio/ogg";
+    const extensao = { "audio/ogg": "ogg", "audio/webm": "webm", "audio/mp4": "m4a" }[tipo] || "audio";
+    const arquivo = new File([blob], `audio-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}.${extensao}`, { type: tipo });
+    const botao = $("#cv-enviar");
+    botao.disabled = true;
+    botao.textContent = "Enviando áudio…";
+    try {
+      estado.conversaDados = await enviarAnexo(arquivo, "", voz ? { "X-Voz": "1", "X-Onda": encodeURIComponent(formaDeOnda(niveis)) } : {});
+      pararDeResponder();
+      renderMensagensConversa({ rolar: true });
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      botao.textContent = "Enviar";
+      renderAvisoConversa();
+    }
+  }
+
+  $("#cv-gravar").addEventListener("click", iniciarGravacao);
+  $("#cv-gravar-cancelar").addEventListener("click", cancelarGravacao);
+  $("#cv-gravar-enviar").addEventListener("click", enviarGravacao);
+
+  // ---- emojis (nas duas caixas de mensagem) ----
+  const EMOJIS = {
+    "Mais usados": "😀 😊 🙂 😉 😍 🥰 😘 😅 😂 🤣 😇 🤩 😎 🤔 🤗 🙏 👍 👏 🙌 💪 👌 ✌️ 🤝 👋 ❤️ 💚 🔥 ✨ 🎉 ✅ 😃 😁",
+    Rostos: "😆 😋 😜 🤪 😏 😌 😴 😬 🙄 😮 😲 😳 🥺 😢 😭 😤 😡 🤯 😱 🤒 🤧 🥳 🤠 🤓 🧐 😐 🙃 🤭 🤫 😶 😑 😕 🫡",
+    Gestos: "👎 ✊ 🤞 🤙 👉 👈 👆 👇 ☝️ ✋ 🖐️ 🫶 🙋 🙋‍♀️ 🙋‍♂️ 🤷 🤷‍♀️ 🤦 💁 🙆 🙅 👀 💃 🕺",
+    Negócios: "💼 📈 📊 💰 💵 💳 🧾 🛒 🛍️ 📦 🚚 🏷️ 📅 ⏰ ⏳ 📞 📱 💻 📧 📝 📄 📎 🔗 📍 🏠 🏢 🏥 🎯 🏆 💡 🔔 🤑",
+    Símbolos: "✔️ ❌ ⚠️ ❗ ❓ ⭐ 🌟 💯 🆕 🔴 🟢 🟡 ➡️ ⬅️ ⬆️ ⬇️ 💬 💭 ☀️ 🌙 ☕ 🍕 🎂 🎁 🌹 🍀 ⚽ 🇧🇷 🇵🇹 🙌🏻 👍🏻 🤝🏻",
+  };
+  const painelEmoji = $("#emoji-painel");
+  let botaoEmoji = null;
+  function abrirEmojis(botao) {
+    botaoEmoji = botao;
+    const recentes = lerPreferencia("emojisRecentes", "").split(" ").filter(Boolean);
+    const grupos = recentes.length ? { Recentes: recentes.join(" "), ...EMOJIS } : EMOJIS;
+    painelEmoji.innerHTML = Object.entries(grupos)
+      .map(([grupo, lista]) => `<h4>${grupo}</h4><div class="emoji-grade">${lista.split(" ").map((e) => `<button type="button" data-emoji="${e}" aria-label="${e}">${e}</button>`).join("")}</div>`)
+      .join("");
+    // Dentro do modal do lead o painel precisa estar no próprio modal (senão fica por baixo dele).
+    (botao.closest("dialog") || document.body).append(painelEmoji);
+    painelEmoji.hidden = false;
+    botao.setAttribute("aria-expanded", "true");
+    const r = botao.getBoundingClientRect();
+    const larg = painelEmoji.offsetWidth;
+    const alt = painelEmoji.offsetHeight;
+    const x = Math.min(Math.max(8, r.right - larg), window.innerWidth - larg - 8);
+    const y = r.top - alt - 8 >= 8 ? r.top - alt - 8 : Math.min(r.bottom + 8, window.innerHeight - alt - 8);
+    painelEmoji.style.left = `${x}px`;
+    painelEmoji.style.top = `${y}px`;
+    // Se algum ancestral desloca o "fixed" (modal com transformação), corrige pela diferença medida.
+    const real = painelEmoji.getBoundingClientRect();
+    painelEmoji.style.left = `${x - (real.left - x)}px`;
+    painelEmoji.style.top = `${y - (real.top - y)}px`;
+  }
+  function fecharEmojis() {
+    if (painelEmoji.hidden) return;
+    painelEmoji.hidden = true;
+    botaoEmoji?.setAttribute("aria-expanded", "false");
+    botaoEmoji = null;
+  }
+  painelEmoji.addEventListener("mousedown", (e) => e.preventDefault()); // o cursor continua no texto
+  painelEmoji.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-emoji]");
+    if (!b || !botaoEmoji) return;
+    const campo = $("#" + botaoEmoji.dataset.emojiPara);
+    const emoji = b.dataset.emoji;
+    campo.setRangeText(emoji, campo.selectionStart ?? campo.value.length, campo.selectionEnd ?? campo.value.length, "end");
+    campo.dispatchEvent(new Event("input", { bubbles: true }));
+    campo.focus();
+    const recentes = [emoji, ...lerPreferencia("emojisRecentes", "").split(" ").filter((x) => x && x !== emoji)].slice(0, 16);
+    gravarPreferencia("emojisRecentes", recentes.join(" "));
+  });
+  document.addEventListener("click", (e) => {
+    const botao = e.target.closest("[data-emoji-para]");
+    if (botao) return botao === botaoEmoji ? fecharEmojis() : abrirEmojis(botao);
+    if (!painelEmoji.contains(e.target)) fecharEmojis();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || painelEmoji.hidden) return;
+    e.preventDefault(); // fecha só o painel, não o modal
+    e.stopPropagation();
+    fecharEmojis();
+    $("#" + (botaoEmoji?.dataset.emojiPara || "cv-texto"))?.focus();
+  }, true);
 
   $("#cv-lista").addEventListener("click", (e) => {
     const baixa = e.target.closest("[data-baixa]");

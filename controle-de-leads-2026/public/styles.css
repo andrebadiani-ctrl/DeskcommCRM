@@ -814,3 +814,52 @@ td.rs-col-barra .rs-barra { height: 10px; }
   .rs-tabela { font-size: 0.8rem; }
   .rs-tabela td, .rs-tabela th { padding-left: 4px; padding-right: 4px; }
 }
+
+/* ---------- chat: responder citando, emojis e mensagem de voz ---------- */
+.msg { position: relative; }
+.msg-citacao { display: block; width: 100%; text-align: left; font: inherit; font-size: 0.8rem; line-height: 1.35; white-space: normal; border: 0; border-left: 4px solid #7c3aed; background: rgba(0, 0, 0, 0.05); border-radius: 6px; padding: 5px 8px; margin: 0 0 5px; cursor: pointer; color: var(--texto-suave); }
+.msg-citacao.de-mim { border-left-color: var(--verde-600); }
+.msg-citacao b { display: block; color: #6d28d9; font-size: 0.76rem; }
+.msg-citacao.de-mim b { color: var(--verde-700); }
+.msg-citacao span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.msg-citacao:hover { background: rgba(0, 0, 0, 0.08); }
+.msg.com-midia .msg-citacao { margin: 2px 2px 5px; width: calc(100% - 4px); }
+.msg-responder { position: absolute; top: 4px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--superficie); color: var(--texto-suave); box-shadow: 0 1px 4px rgba(6, 35, 26, 0.18); cursor: pointer; opacity: 0; transition: opacity 0.12s; }
+.msg.entrada .msg-responder { right: -34px; }
+.msg.saida .msg-responder { left: -34px; }
+.msg-responder svg { width: 15px; height: 15px; }
+.msg:hover .msg-responder, .msg-responder:focus-visible { opacity: 1; }
+.msg-responder:hover { color: var(--verde-700); }
+@media (hover: none) { .msg-responder { opacity: 0.75; } }
+.msg.destacada { animation: destacar 1.4s ease-out; }
+@keyframes destacar { 0%, 40% { box-shadow: 0 0 0 3px var(--verde-400); } 100% { box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08); } }
+
+.cv-citando { display: flex; align-items: center; gap: 8px; background: var(--fundo); border-left: 4px solid var(--verde-600); border-radius: 8px; padding: 6px 6px 6px 10px; margin-bottom: 8px; font-size: 0.82rem; }
+.cv-citando div { flex: 1; min-width: 0; }
+.cv-citando b { display: block; color: var(--verde-700); font-size: 0.78rem; }
+.cv-citando span { display: block; color: var(--texto-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.campo-com-sugestoes textarea { padding-right: 40px; }
+.botao-emoji { position: absolute; right: 6px; bottom: 8px; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 50%; background: none; color: var(--texto-suave); cursor: pointer; }
+.botao-emoji:hover, .botao-emoji[aria-expanded="true"] { background: var(--verde-50); color: var(--verde-700); }
+.botao-emoji svg { width: 20px; height: 20px; }
+.emoji-painel { position: fixed; z-index: 120; width: min(340px, calc(100vw - 16px)); max-height: min(320px, 60vh); overflow-y: auto; background: var(--superficie); border: 1px solid var(--borda); border-radius: 14px; box-shadow: 0 12px 36px rgba(6, 35, 26, 0.22); padding: 6px 10px 10px; margin: 0; }
+.emoji-painel h4 { position: sticky; top: -6px; background: var(--superficie); margin: 0; padding: 8px 2px 4px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--texto-suave); }
+.emoji-grade { display: grid; grid-template-columns: repeat(8, 1fr); }
+.emoji-grade button { font-size: 1.35rem; line-height: 1; border: 0; background: none; border-radius: 8px; padding: 6px 0; cursor: pointer; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.emoji-grade button:hover, .emoji-grade button:focus-visible { background: var(--verde-50); }
+
+.microfone { flex: none; align-self: center; }
+.microfone svg { width: 20px; height: 20px; }
+.gravando { display: flex; align-items: center; gap: 10px; background: var(--fundo); border-radius: 12px; padding: 6px 6px 6px 8px; }
+.gravando-ponto { width: 10px; height: 10px; border-radius: 50%; background: #dc2626; flex: none; animation: piscar 1s infinite; }
+@keyframes piscar { 50% { opacity: 0.25; } }
+.gravando-tempo { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 38px; color: var(--texto); }
+.gravando-onda { flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; overflow: hidden; }
+.gravando-onda i { width: 3px; flex: none; border-radius: 2px; background: var(--verde-600); }
+@media (max-width: 760px) {
+  .msg-responder { width: 26px; height: 26px; }
+  .msg.entrada .msg-responder { right: -30px; }
+  .msg.saida .msg-responder { left: -30px; }
+  .gravando .btn { padding: 10px 12px; }
+}

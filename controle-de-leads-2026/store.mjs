@@ -208,9 +208,10 @@ export function chaveTelefone(t) {
  * Mensagem como fica no histórico do lead. A mídia leva só a descrição; o arquivo e as chaves
  * para baixá-lo moram na conversa (conversas.mjs) e a tela busca por /api/midia/:id.
  */
-export function paraHistoricoDoLead({ id, direcao, texto, em, origem, midia }) {
+export function paraHistoricoDoLead({ id, direcao, texto, em, origem, midia, citacao }) {
   const m = { id: id || "", direcao, texto: texto || "", em };
   if (origem) m.origem = origem;
+  if (citacao?.id) m.citacao = { id: String(citacao.id).slice(0, 100), texto: String(citacao.texto || "").slice(0, 300) };
   if (midia) m.midia = { tipo: midia.tipo, mimetype: midia.mimetype, nome: midia.nome || "", tamanho: midia.tamanho || 0, segundos: midia.segundos || 0, ptt: !!midia.ptt };
   return m;
 }

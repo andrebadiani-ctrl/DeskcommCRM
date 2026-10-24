@@ -10,7 +10,7 @@ const minutosAtras = (n) => new Date(Date.now() - n * 60000).toISOString();
 
 const CONVERSAS = [
   { jid: "5511991234567@s.whatsapp.net", nome: "Juliana Prado", msgs: [[180, 0, "Boa tarde! Vi o anúncio de vocês no Instagram."], [178, 0, "Vocês atendem empresas pequenas? Tenho uma loja de roupas em Campinas."], [20, 0, "Consegue me passar valores?"]] },
-  { jid: "5521987650000@s.whatsapp.net", nome: "Roberto Alves", msgs: [[300, 0, "Olá, queria agendar uma demonstração"], [290, 1, "Oi Roberto! Claro, qual o melhor horário pra você?"], [45, 0, "Pode ser quinta às 14h?"]] },
+  { jid: "5521987650000@s.whatsapp.net", nome: "Roberto Alves", msgs: [[300, 0, "Olá, queria agendar uma demonstração"], [290, 1, "Oi Roberto! Claro, qual o melhor horário pra você?"], [45, 0, "Pode ser quinta às 14h?", 1]] },
   { jid: "351913334444@s.whatsapp.net", nome: "Inês Carvalho", msgs: [[1500, 0, "Bom dia, sou de Lisboa. Trabalham com empresas em Portugal?"], [1490, 1, "Bom dia, Inês! Sim, atendemos Portugal também."], [1480, 0, "Ótimo, envia-me a apresentação por favor."]] },
   { jid: "553198761234@s.whatsapp.net", nome: "Ana Ribeiro", msgs: [[60 * 30, 0, "Oi! Queria entender como funciona o sistema para clínicas."], [60 * 29, 1, "Olá, Ana! Tudo bem? Obrigado pelo contato."]] },
   { jid: "94827364519283@lid", nome: "Marcos (sem número visível)", msgs: [[95, 0, "Oi, peguei seu contato com o Pedro. Podemos falar sobre a proposta?"]] },
@@ -120,9 +120,12 @@ export class WhatsAppSimulado extends EventEmitter {
     setTimeout(() => {
       for (const c of CONVERSAS) {
         this.emit("conversa", { jid: c.jid, nome: c.nome, telefone: c.jid.endsWith("@s.whatsapp.net") ? digitos(c.jid) : "" });
-        for (const [min, deMim, texto] of c.msgs) {
-          this.#mensagem(c.jid, { texto, fromMe: !!deMim, nome: deMim ? "" : c.nome, em: minutosAtras(min), historico: true });
-        }
+        // 4º item = índice da mensagem que esta responde (citação, como no WhatsApp).
+        const idDemo = (i) => `demo-${digitos(c.jid)}-${i}`;
+        c.msgs.forEach(([min, deMim, texto, cita], i) => {
+          const citacao = cita == null ? null : { id: idDemo(cita), texto: c.msgs[cita][2] };
+          this.#mensagem(c.jid, { id: idDemo(i), texto, citacao, fromMe: !!deMim, nome: deMim ? "" : c.nome, em: minutosAtras(min), historico: true });
+        });
       }
       for (const [jid, min, { texto, midia }] of MIDIAS) {
         const { amostra, ...descricao } = midia;
@@ -137,13 +140,13 @@ export class WhatsAppSimulado extends EventEmitter {
     }, 300);
   }
 
-  #mensagem(jid, { texto, midia = null, fromMe = false, nome = "", em = new Date().toISOString(), nova = false, historico = false, id = randomUUID() }) {
+  #mensagem(jid, { texto, midia = null, citacao = null, fromMe = false, nome = "", em = new Date().toISOString(), nova = false, historico = false, id = randomUUID() }) {
     if (this.diag) {
       if (historico) this.diag.mensagensHistorico += 1;
       else this.diag.mensagensAoVivo += 1;
       this.diag.ultimaMensagemEm = new Date().toISOString();
     }
-    this.emit("mensagem", { jid, id, fromMe, telefone: jid.endsWith("@s.whatsapp.net") ? digitos(jid.split("@")[0]) : "", nome, texto, midia, em, nova, historico });
+    this.emit("mensagem", { jid, id, fromMe, telefone: jid.endsWith("@s.whatsapp.net") ? digitos(jid.split("@")[0]) : "", nome, texto, citacao, midia, em, nova, historico });
   }
 
   // Como o WhatsApp real: o pedido sai na hora e as mensagens antigas chegam um pouco depois.
@@ -165,15 +168,24 @@ export class WhatsAppSimulado extends EventEmitter {
     return gerar();
   }
 
-  async enviarMidiaParaJid(jid, { mimetype, nome, legenda }) {
+  async enviarMidiaParaJid(jid, { mimetype, nome, legenda, voz = false, segundos = 0, citar }) {
     if (this.status !== "conectado") throw new Error("WhatsApp não está conectado");
     const { tipoDeEnvio } = await import("./whatsapp.mjs");
-    const tipo = tipoDeEnvio(mimetype);
+    const tipo = voz ? "audio" : tipoDeEnvio(mimetype);
     const id = randomUUID();
     const em = new Date().toISOString();
+    const citacao = citar?.id ? { id: citar.id, texto: citar.texto || "Mensagem" } : null;
     // Eco, como o WhatsApp real: chega antes de o CRM registrar o envio (sem o arquivo local).
-    this.#mensagem(jid, { texto: legenda || "", fromMe: true, em, id, midia: { tipo, mimetype, nome, tamanho: 0, wa: { simulado: "eco" } } });
+    const midia = { tipo, mimetype: voz ? "audio/ogg" : mimetype, nome, tamanho: 0, ...(voz ? { ptt: true, segundos: Math.round(segundos) } : {}), wa: { simulado: "eco" } };
+    this.#mensagem(jid, { texto: legenda || "", fromMe: true, em, id, citacao, midia });
+    // O cliente responde ao áudio citando-o.
+    if (voz) this.#responderDepois(jid, "Ouvi seu áudio, obrigado! 👍", { id, texto: "🎤 Áudio" });
     return { jid, id, em, tipo };
+  }
+
+  #responderDepois(jid, texto, citacao = null) {
+    const nome = CONVERSAS.find((c) => c.jid === jid)?.nome || "";
+    setTimeout(() => this.#mensagem(jid, { texto, nome, citacao, nova: true }), 4000);
   }
 
   parar() {
@@ -196,14 +208,15 @@ export class WhatsAppSimulado extends EventEmitter {
     return lead.whatsappJid ? this.enviarParaJid(lead.whatsappJid, texto) : this.enviar(lead.telefone, texto);
   }
 
-  async enviarParaJid(jid, texto) {
+  async enviarParaJid(jid, texto, { citar } = {}) {
     if (this.status !== "conectado") throw new Error("WhatsApp não está conectado");
     const id = randomUUID();
     const em = new Date().toISOString();
+    const citacao = citar?.id ? { id: citar.id, texto: citar.texto || "Mensagem" } : null;
     // O WhatsApp real devolve o eco da mensagem enviada; o sistema desduplica pelo id.
-    this.#mensagem(jid, { texto, fromMe: true, em, id });
-    const nome = CONVERSAS.find((c) => c.jid === jid)?.nome || "";
-    setTimeout(() => this.#mensagem(jid, { texto: RESPOSTAS[Math.floor(Math.random() * RESPOSTAS.length)], nome, nova: true }), 4000);
+    this.#mensagem(jid, { texto, fromMe: true, em, id, citacao });
+    // Respondeu citando? O cliente responde citando de volta a sua mensagem.
+    this.#responderDepois(jid, RESPOSTAS[Math.floor(Math.random() * RESPOSTAS.length)], citacao ? { id, texto } : null);
     return { jid, id, em };
   }
 }

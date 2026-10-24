@@ -76,6 +76,17 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
   - **Enviar anexos:** botão 📎 (ou arraste o arquivo para o chat), com legenda opcional — até 64 MB.
     JPG/PNG/WEBP vão como foto, MP4 como vídeo, OGG/MP3/M4A como áudio; o resto vai como documento.
   - Por segurança, só foto, vídeo, áudio e PDF abrem no navegador; qualquer outro arquivo é baixado.
+  - **Responder citando:** passe o mouse numa mensagem (no celular, toque na setinha ↩) e clique em
+    *Responder* — a resposta (texto, anexo ou áudio) chega no WhatsApp do cliente citando a mensagem,
+    igual ao celular. Quando o cliente responde citando, a citação aparece acima do balão; clique
+    nela para ir até a mensagem original.
+  - **Emojis:** botão 😊 dentro da caixa de mensagem (na conversa e no lead); os últimos usados
+    ficam no topo.
+  - **Gravar áudio:** botão 🎤 ao lado do *Enviar*. Grava pelo microfone do computador e chega no
+    celular do cliente como **mensagem de voz** (com a forma de onda), até 5 minutos. A 🗑 descarta.
+    O navegador só libera o microfone em `http://localhost` (no próprio computador) ou em endereço
+    **https** — veja *Acesso de fora da rede*. Chrome, Edge e Firefox gravam como voz; o Safari
+    envia como arquivo de áudio.
   - Mídia antiga pode ter expirado no WhatsApp: com o celular conectado ele reenvia; se não der,
     aparece "Não foi possível abrir este arquivo — tentar de novo".
   - **Fila de atendimento** (filtro *Fila*): quem manda mensagem entra na fila **por ordem de
