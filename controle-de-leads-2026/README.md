@@ -116,8 +116,23 @@ e **integração com o WhatsApp por QR Code**. Visual verde-escuro, responsivo (
     follow-ups pendentes são cancelados. Também dá para marcar à mão no lead.
   - As regras de exemplo vêm **pausadas**: nada é enviado até você ativar uma regra.
   - Os follow-ups só saem com o WhatsApp conectado e o servidor ligado; enquanto isso eles esperam.
-- **Assistente de IA (Claude, da Anthropic)** — opcional; configure em *WhatsApp › Assistente de IA*:
-  - **Chave da API:** crie em console.anthropic.com › *API Keys* e cole no campo (ou defina a
+- **Assistente de IA** — configure em *WhatsApp › Assistente de IA*, escolhendo **qual IA usar**:
+  - **ChatGPT da sua conta — grátis, sem créditos de API** (padrão numa instalação nova). Ao clicar
+    em ✨ na conversa, o sistema copia as instruções da empresa e a conversa e abre o ChatGPT numa aba
+    nova, na sua conta (a gratuita também serve). Você cola (Ctrl+V), envia, copia a resposta e cola
+    de volta no sistema — ela vai para a caixa de mensagem (sugestão) ou para as observações do lead
+    (resumo). A assinatura do ChatGPT não pode ser ligada ao sistema para responder sozinha: a OpenAI
+    não oferece isso, e os jeitos não oficiais quebram os termos de uso e podem bloquear a conta. Por
+    isso este modo não faz o atendimento automático.
+  - **Modelo grátis (Ollama) ou outro serviço compatível** — também sem créditos, e faz tudo,
+    inclusive o atendimento automático. Instale o [Ollama](https://ollama.com) no computador (ou na
+    VPS), baixe um modelo (`ollama pull gemma3:4b`) e deixe o endereço `http://localhost:11434/v1`.
+    Roda no seu computador, sem internet e sem mandar as conversas para fora; precisa de um
+    computador razoável (8 GB de memória para modelos pequenos) e é mais lento e menos esperto que o
+    ChatGPT ou o Claude. Na VPS com Docker, use `http://host.docker.internal:11434/v1`. Serve também
+    para serviços com cota gratuita e o mesmo formato (Gemini, Groq…): endereço, modelo e chave deles.
+  - **Claude (API da Anthropic)** — pago por uso, o mais capaz.
+  - **Chave da API (Claude):** crie em console.anthropic.com › *API Keys* e cole no campo (ou defina a
     variável `ANTHROPIC_API_KEY` no servidor). O uso é **cobrado pela Anthropic na sua conta**, por
     volume de texto. Escolha o modelo: *Opus 5.5* (mais capaz, padrão), *Sonnet 5.5* (metade do
     preço) ou *Haiku 5.5* (o mais barato). O botão *Testar a chave* confirma que está tudo certo.
@@ -228,12 +243,13 @@ Para expor na internet, use o `deploy/docker-compose.yml` (já vem com o HTTPS) 
 | `DATA_DIR` | `./data` | Onde ficam `leads.json` e a sessão do WhatsApp |
 | `TZ` | `America/Sao_Paulo` | Fuso usado no carimbo das notas rápidas |
 | `WA_LOG_LEVEL` | `silent` | Log da biblioteca do WhatsApp (`info`, `debug`) |
+| `IA_COMPATIVEL_CHAVE` | *(vazia)* | Chave do serviço compatível (Gemini, Groq…) para o assistente de IA, se não quiser colar na tela |
 | `ANTHROPIC_API_KEY` | *(vazia)* | Chave da API da Anthropic para o assistente de IA (opcional; também dá para colar na tela) |
 | `WA_SIMULADO` | *(vazia)* | `1` = modo demonstração: WhatsApp de mentira com conversas de exemplo, dados em `data-demonstracao/` |
 
 ## Versão
 
-A versão e a data dela aparecem no canto superior direito (ex.: `v1.5.0 · 24/10/2026`). Elas vêm
+A versão e a data dela aparecem no canto superior direito (ex.: `v1.6.0 · 25/10/2026`). Elas vêm
 dos campos `version` e `dataVersao` do `package.json`.
 
 ## WhatsApp não carrega as mensagens? (passo a passo)

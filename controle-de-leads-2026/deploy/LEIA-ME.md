@@ -109,6 +109,24 @@ Baixe esse arquivo para o seu computador de vez em quando (`scp root@IP-DA-VPS:/
 | Parar | `docker compose down` (os dados ficam) |
 | Trocar a senha | edite `APP_PASSWORD` no `.env` e rode `docker compose up -d` |
 
+## Assistente de IA sem pagar créditos
+
+- **ChatGPT da sua conta** (copiar e colar) funciona igual na VPS: nada a instalar.
+- **Ollama na própria VPS** (responde sozinho, grátis): precisa de uma VPS com **8 GB de memória ou
+  mais** — numa de 1–2 GB use o ChatGPT da conta ou a cota grátis do Gemini. Na VPS:
+
+  ```bash
+  curl -fsSL https://ollama.com/install.sh | sh
+  mkdir -p /etc/systemd/system/ollama.service.d
+  printf '[Service]\nEnvironment="OLLAMA_HOST=0.0.0.0"\n' > /etc/systemd/system/ollama.service.d/rede.conf
+  systemctl daemon-reload && systemctl restart ollama && ollama pull gemma3:4b
+  ufw deny 11434/tcp   # o Ollama não fica aberto para a internet (só o sistema usa)
+  ```
+
+  No sistema, em *WhatsApp › Assistente de IA*, escolha o modelo grátis e use o endereço
+  `http://host.docker.internal:11434/v1`. Se o seu provedor tem firewall no painel, não libere a
+  porta 11434 lá.
+
 ## Problemas comuns
 
 - **O endereço não abre / "conexão não é segura"** — quase sempre é o DNS: confira se o registro

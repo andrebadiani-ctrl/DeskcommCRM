@@ -176,7 +176,7 @@ async function transferirParaHumano(c, lead, motivo) {
 async function atenderComIA(jid) {
   const c = conversas.obter(jid);
   const lead = c && leadDaConversa(c.jid, c.telefone);
-  if (!c || !lead || !ia.config.autoAtendimento || lead.etapa !== ETAPA_IA || lead.optOut || whatsapp.status !== "conectado") return;
+  if (!c || !lead || !ia.config.autoAtendimento || ia.manual || lead.etapa !== ETAPA_IA || lead.optOut || whatsapp.status !== "conectado") return;
   if (c.mensagens.at(-1)?.direcao !== "entrada") return; // já foi respondido
   const agora = Date.now();
   // Mensagem enviada por uma pessoa (pelo CRM ou pelo celular) — follow-up e IA não contam.

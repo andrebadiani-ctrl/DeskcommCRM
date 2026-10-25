@@ -378,13 +378,34 @@
         <div class="wa-cartao bloco largo" id="secao-ia">
           <div class="bloco-topo">
             <div>
-              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>Assistente de IA (Claude)</h2>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>Assistente de IA</h2>
               <p>Sugere respostas e resume conversas na aba <strong>Conversas</strong> (botões ✨). Ligado o atendimento automático, responde sozinho os leads em <strong>Em atendimento IA</strong> e passa para <strong>Atendimento Humano</strong> quando não deve responder.</p>
             </div>
             <span class="selo" id="ia-selo">Sem chave</span>
           </div>
           <form id="form-ia" class="ia-form" autocomplete="off">
-            <div class="grade">
+            <label class="campo">Qual IA usar
+              <select name="provedor" id="ia-provedor"></select>
+            </label>
+            <div class="ia-explica" data-para-provedor="chatgpt">
+              <strong>Sem custo de API.</strong> Ao clicar em ✨ na conversa, o sistema copia as instruções e a conversa e abre o
+              <strong>ChatGPT</strong> numa aba nova, na sua conta (a gratuita também serve). Você cola, envia e traz a resposta de volta.
+              Como alguém precisa colar, este modo não faz o atendimento automático.
+            </div>
+            <div class="grade" data-para-provedor="compativel">
+              <label class="campo">Endereço do serviço
+                <input name="compativelUrl" placeholder="http://localhost:11434/v1" spellcheck="false" />
+                <small class="dica">Ollama no computador: <code>http://localhost:11434/v1</code> · Gemini (cota grátis): <code>https://generativelanguage.googleapis.com/v1beta/openai</code></small>
+              </label>
+              <label class="campo">Modelo
+                <input name="compativelModelo" placeholder="gemma3:4b" spellcheck="false" />
+                <small class="dica">No Ollama, baixe antes: <code>ollama pull gemma3:4b</code></small>
+              </label>
+              <label class="campo largo">Chave do serviço (o Ollama não precisa)
+                <input type="password" name="chaveCompativel" id="ia-chave-compativel" autocomplete="off" spellcheck="false" />
+              </label>
+            </div>
+            <div class="grade" data-para-provedor="anthropic">
               <label class="campo">Chave da API da Anthropic
                 <input type="password" name="chave" id="ia-chave" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
                 <small class="dica" id="ia-chave-dica">Crie em console.anthropic.com › API Keys. O uso é cobrado pela Anthropic na sua conta.</small>
@@ -400,7 +421,7 @@
             <label class="interruptor">
               <input type="checkbox" name="autoAtendimento" id="ia-auto" />
               <span class="trilho"></span>
-              <span>Atendimento automático para os leads na etapa <strong>Em atendimento IA</strong></span>
+              <span>Atendimento automático para os leads na etapa <strong>Em atendimento IA</strong> <small class="dica" id="ia-auto-aviso"></small></span>
             </label>
             <div class="grade ia-auto-opcoes">
               <label class="campo">Mensagem ao passar para a equipe
@@ -417,7 +438,7 @@
               </label>
             </div>
             <div class="ia-botoes">
-              <button type="button" class="btn btn-secundario" id="ia-testar">Testar a chave</button>
+              <button type="button" class="btn btn-secundario" id="ia-testar">Testar conexão</button>
               <button type="submit" class="btn btn-primario">Salvar</button>
             </div>
           </form>
@@ -447,6 +468,32 @@
       </div>
     </section>
   </main>
+
+  <!-- ChatGPT da conta da pessoa: copiar, colar e trazer a resposta -->
+  <dialog class="modal modal-pequeno" id="modal-chatgpt" aria-labelledby="chatgpt-titulo">
+    <div class="modal-topo">
+      <h2 id="chatgpt-titulo">Usar o ChatGPT</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo">
+      <ol class="chatgpt-passos">
+        <li><strong>Copie o pedido e abra o ChatGPT</strong> — já vai com as instruções da empresa e a conversa.
+          <div class="chatgpt-acoes"><button type="button" class="btn btn-primario" id="chatgpt-abrir">Copiar e abrir o ChatGPT</button><span class="dica" id="chatgpt-copiado"></span></div>
+          <details class="chatgpt-ver"><summary>Ver o texto que será copiado</summary><textarea id="chatgpt-prompt" rows="8" readonly></textarea></details>
+        </li>
+        <li><strong>No ChatGPT, cole</strong> (<kbd>Ctrl</kbd>+<kbd>V</kbd>, no celular: segurar e Colar) <strong>e envie.</strong></li>
+        <li id="chatgpt-passo-voltar"><strong>Copie a resposta e cole aqui:</strong>
+          <textarea id="chatgpt-resposta" rows="5" placeholder="Cole aqui a resposta do ChatGPT"></textarea>
+        </li>
+      </ol>
+      <p class="dica">O ChatGPT usa a sua conta da OpenAI, com as configurações de privacidade dela. Áudios e fotos da conversa não vão junto.</p>
+    </div>
+    <div class="modal-rodape">
+      <span class="espaco"></span>
+      <button type="button" class="btn btn-secundario" data-fechar>Fechar</button>
+      <button type="button" class="btn btn-primario" id="chatgpt-usar">Usar esta resposta</button>
+    </div>
+  </dialog>
 
   <!-- Resumo da conversa pela IA -->
   <dialog class="modal modal-pequeno" id="modal-resumo" aria-labelledby="resumo-titulo">

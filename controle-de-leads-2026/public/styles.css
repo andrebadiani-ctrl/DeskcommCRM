@@ -1004,3 +1004,13 @@ td.rs-col-barra .rs-barra { height: 10px; }
   :root:not([data-tema="claro"]) .msg-ia, :root:not([data-tema="claro"]) .cv-ia-ativa, :root:not([data-tema="claro"]) .cv-resumo, :root:not([data-tema="claro"]) .ia-sugerir { color: #c4b5fd; }
 }
 @keyframes girar { to { transform: rotate(360deg); } }
+
+/* ---------- ChatGPT da conta (copiar e colar) ---------- */
+.ia-explica { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--tinta); font-size: 0.86rem; line-height: 1.5; color: var(--texto); }
+.ia-form code { font-size: 0.78rem; background: var(--superficie-2); border: 1px solid var(--borda); border-radius: 5px; padding: 0 4px; word-break: break-all; }
+.chatgpt-passos { margin: 0; padding-left: 22px; display: grid; gap: 16px; line-height: 1.5; }
+.chatgpt-passos textarea { width: 100%; margin-top: 8px; }
+.chatgpt-acoes { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.chatgpt-ver { margin-top: 8px; font-size: 0.84rem; }
+.chatgpt-ver summary { cursor: pointer; color: var(--texto-suave); }
+#chatgpt-prompt { font-size: 0.78rem; color: var(--texto-suave); }

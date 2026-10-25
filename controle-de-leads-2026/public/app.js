@@ -3399,8 +3399,11 @@
     if (!d) return;
     const form = $("#form-ia");
     const selo = $("#ia-selo");
-    selo.textContent = !d.configurada ? "Sem chave" : d.autoAtendimento ? "Atendimento automático ligado" : "Pronta (só sugestões)";
+    selo.textContent = !d.configurada ? (d.provedor === "anthropic" ? "Sem chave" : "Falta configurar")
+      : d.provedor === "chatgpt" ? "ChatGPT da sua conta (grátis)"
+      : d.autoAtendimento ? "Atendimento automático ligado" : "Pronta (só sugestões)";
     selo.className = "selo" + (d.configurada ? (d.autoAtendimento ? " on" : " espera") : "");
+    $("#ia-chave-compativel").placeholder = d.chaveCompativelFinal ? `•••• ${d.chaveCompativelFinal} (deixe em branco para manter)` : "Só para Gemini, Groq, OpenAI…";
     $("#ia-modelo").innerHTML = d.modelos.map((m) => `<option value="${m.id}"${m.id === d.modelo ? " selected" : ""}>${esc(m.nome)}</option>`).join("");
     $("#ia-chave").placeholder = d.configurada ? `•••• ${d.chaveFinal} (deixe em branco para manter)` : "sk-ant-…";
     $("#ia-chave-dica").textContent = d.chaveDoAmbiente
@@ -3408,6 +3411,9 @@
       : "Crie em console.anthropic.com › API Keys. O uso é cobrado pela Anthropic na sua conta.";
     // Não sobrescreve o que a pessoa está digitando.
     if (!form.contains(document.activeElement)) {
+      form.provedor.innerHTML = d.provedores.map((p) => `<option value="${p.id}"${p.id === d.provedor ? " selected" : ""}>${esc(p.nome)}</option>`).join("");
+      form.compativelUrl.value = d.compativelUrl;
+      form.compativelModelo.value = d.compativelModelo;
       form.instrucoes.value = d.instrucoes;
       form.autoAtendimento.checked = d.autoAtendimento;
       form.mensagemTransferencia.value = d.mensagemTransferencia;
@@ -3415,17 +3421,31 @@
       form.humanoAssumeMinutos.value = d.humanoAssumeMinutos;
       form.maxRespostasPorHora.value = d.maxRespostasPorHora;
     }
-    $(".ia-auto-opcoes").classList.toggle("apagado", !form.autoAtendimento.checked);
+    mostrarCamposDoProvedor();
     $("#ia-atividade").innerHTML = d.atividade.length
       ? `<ul class="ia-atividade">${d.atividade.map((a) => `<li><time>${new Date(a.em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time><b>${esc(a.nome || "")}</b> ${ROTULO_ATIVIDADE[a.tipo] || esc(a.tipo)}${a.texto ? `<span>${esc(a.texto)}</span>` : ""}</li>`).join("")}</ul>`
       : `<p class="dica">Nada ainda. Quando o atendimento automático agir, aparece aqui.</p>`;
   }
 
-  $("#form-ia").addEventListener("change", (e) => e.target.name === "autoAtendimento" && $(".ia-auto-opcoes").classList.toggle("apagado", !e.target.checked));
-  $("#form-ia").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const f = e.currentTarget;
+  /** Mostra só os campos do provedor escolhido; o ChatGPT da conta não faz atendimento automático. */
+  function mostrarCamposDoProvedor() {
+    const form = $("#form-ia");
+    const provedor = form.provedor.value;
+    $$("[data-para-provedor]", form).forEach((el) => (el.hidden = el.dataset.paraProvedor !== provedor));
+    const manual = provedor === "chatgpt";
+    if (manual) form.autoAtendimento.checked = false;
+    form.autoAtendimento.disabled = manual;
+    $("#ia-auto-aviso").textContent = manual ? "— precisa do modelo grátis (Ollama) ou do Claude" : "";
+    $("#ia-testar").hidden = manual;
+    $(".ia-auto-opcoes").classList.toggle("apagado", !form.autoAtendimento.checked);
+  }
+  $("#form-ia").addEventListener("change", (e) => (e.target.name === "provedor" || e.target.name === "autoAtendimento") && mostrarCamposDoProvedor());
+
+  function dadosDoFormIA(f) {
     const corpo = {
+      provedor: f.provedor.value,
+      compativelUrl: f.compativelUrl.value,
+      compativelModelo: f.compativelModelo.value,
       modelo: f.modelo.value,
       instrucoes: f.instrucoes.value,
       autoAtendimento: f.autoAtendimento.checked,
@@ -3435,9 +3455,17 @@
       maxRespostasPorHora: Number(f.maxRespostasPorHora.value),
     };
     if (f.chave.value.trim()) corpo.chave = f.chave.value.trim();
+    if (f.chaveCompativel.value.trim()) corpo.chaveCompativel = f.chaveCompativel.value.trim();
+    return corpo;
+  }
+  $("#form-ia").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.currentTarget;
+    const corpo = dadosDoFormIA(f);
     try {
       iaEstado.dados = await api("PATCH", "/api/ia", corpo);
       f.chave.value = "";
+      f.chaveCompativel.value = "";
       document.activeElement?.blur();
       renderIA();
       toast(corpo.autoAtendimento ? "Assistente salvo. Atendimento automático ligado para a etapa Em atendimento IA." : "Assistente de IA salvo.");
@@ -3447,26 +3475,30 @@
   });
   $("#ia-testar").addEventListener("click", async (e) => {
     const botao = e.currentTarget;
-    const chave = $("#ia-chave").value.trim();
+    const f = $("#form-ia");
     botao.disabled = true;
     botao.textContent = "Testando…";
     try {
-      if (chave) iaEstado.dados = await api("PATCH", "/api/ia", { chave, modelo: $("#ia-modelo").value });
+      // Testa o que está na tela: salva antes (sem mexer no atendimento automático).
+      const { autoAtendimento: _a, ...corpo } = dadosDoFormIA(f);
+      iaEstado.dados = await api("PATCH", "/api/ia", corpo);
+      f.chave.value = "";
+      f.chaveCompativel.value = "";
       const r = await api("POST", "/api/ia/testar");
-      $("#ia-chave").value = "";
       renderIA();
-      toast(`A chave funciona! O ${$("#ia-modelo").selectedOptions[0]?.textContent.split(" —")[0] || r.modelo} respondeu.`);
+      const nome = corpo.provedor === "anthropic" ? $("#ia-modelo").selectedOptions[0]?.textContent.split(" —")[0] : r.modelo;
+      toast(`Funcionou! O ${nome || r.modelo} respondeu.`);
     } catch (err) {
       toast(err.message, true);
     } finally {
       botao.disabled = false;
-      botao.textContent = "Testar a chave";
+      botao.textContent = "Testar conexão";
     }
   });
 
   function precisaConfigurarIA() {
     if (iaPronta()) return false;
-    toast("Cadastre a chave da API em WhatsApp › Assistente de IA para usar a IA.", true);
+    toast("Configure o assistente em WhatsApp › Assistente de IA para usar a IA.", true);
     return true;
   }
 
@@ -3480,8 +3512,9 @@
     botao.classList.add("pensando");
     campo.placeholder = "A IA está escrevendo uma sugestão…";
     try {
-      const { resposta } = await api("POST", `/api/conversas/${jidUrl(estado.conversaAberta)}/ia/sugerir`, orientacao ? { orientacao } : {});
-      campo.value = resposta;
+      const r = await api("POST", `/api/conversas/${jidUrl(estado.conversaAberta)}/ia/sugerir`, orientacao ? { orientacao } : {});
+      if (r.manual) return abrirChatGPT(r.prompt, { aoUsar: (texto) => colocarNoCampo(texto), rotulo: "Usar esta resposta" });
+      campo.value = r.resposta;
       campo.focus();
       campo.setSelectionRange(campo.value.length, campo.value.length);
       toast("Sugestão pronta: revise e envie.");
@@ -3491,6 +3524,63 @@
       botao.disabled = false;
       botao.classList.remove("pensando");
       campo.placeholder = "Escreva uma mensagem… (digite / para respostas rápidas)";
+    }
+  });
+
+  // ---- ChatGPT da conta da pessoa: copia o pedido, abre o ChatGPT e recebe a resposta colada ----
+  const modalChatGPT = $("#modal-chatgpt");
+  let usarRespostaChatGPT = null;
+  $$("[data-fechar]", modalChatGPT).forEach((b) => b.addEventListener("click", () => modalChatGPT.close()));
+  modalChatGPT.addEventListener("click", (e) => e.target === modalChatGPT && modalChatGPT.close());
+  function colocarNoCampo(texto) {
+    const campo = $("#cv-texto");
+    campo.value = texto;
+    campo.focus();
+    campo.setSelectionRange(campo.value.length, campo.value.length);
+    toast("Resposta do ChatGPT no campo: revise e envie.");
+  }
+  function abrirChatGPT(prompt, { aoUsar = null, rotulo = "" } = {}) {
+    usarRespostaChatGPT = aoUsar;
+    $("#chatgpt-prompt").value = prompt;
+    $("#chatgpt-resposta").value = "";
+    $("#chatgpt-copiado").textContent = "";
+    $("#chatgpt-passo-voltar").hidden = !aoUsar;
+    $("#chatgpt-usar").hidden = !aoUsar;
+    $("#chatgpt-usar").textContent = rotulo || "Usar esta resposta";
+    $(".chatgpt-ver").open = false;
+    modalChatGPT.showModal();
+  }
+  /** Copia o texto; fora de https/localhost o navegador não libera a área de transferência moderna. */
+  async function copiarTexto(texto) {
+    try {
+      await navigator.clipboard.writeText(texto);
+      return true;
+    } catch {
+      const area = $("#chatgpt-prompt");
+      $(".chatgpt-ver").open = true;
+      area.focus();
+      area.select();
+      try {
+        return document.execCommand("copy");
+      } catch {
+        return false;
+      }
+    }
+  }
+  $("#chatgpt-abrir").addEventListener("click", async () => {
+    const ok = await copiarTexto($("#chatgpt-prompt").value);
+    $("#chatgpt-copiado").textContent = ok ? "✓ Copiado! Agora cole no ChatGPT." : "Não deu para copiar sozinho: abra \"Ver o texto\", selecione tudo e copie.";
+    window.open("https://chatgpt.com/", "_blank", "noopener");
+    if (!$("#chatgpt-passo-voltar").hidden) setTimeout(() => $("#chatgpt-resposta").focus(), 300);
+  });
+  $("#chatgpt-usar").addEventListener("click", async () => {
+    const texto = $("#chatgpt-resposta").value.trim();
+    if (!texto) return toast("Cole aqui a resposta do ChatGPT primeiro.", true);
+    try {
+      await usarRespostaChatGPT?.(texto);
+      modalChatGPT.close();
+    } catch (err) {
+      toast(err.message, true);
     }
   });
 
@@ -3507,6 +3597,18 @@
     let r;
     try {
       r = await api("POST", `/api/conversas/${jidUrl(jid)}/ia/resumir`);
+      if (r.manual) {
+        modalResumo.close();
+        const c = estado.conversaDados;
+        const lead = c?.lead && estado.leads.find((l) => l.id === c.lead.id);
+        // Com lead, o resumo trazido de volta vai para as observações dele.
+        return abrirChatGPT(r.prompt, lead
+          ? { rotulo: "Salvar nas observações do lead", aoUsar: async (texto) => {
+              await api("POST", `/api/leads/${lead.id}/notas`, { texto: `Resumo da conversa (ChatGPT): ${texto.replace(/\s+/g, " ")}`.slice(0, 1000) });
+              toast("Resumo salvo nas observações do lead.");
+            } }
+          : {});
+      }
     } catch (err) {
       $("#resumo-corpo").innerHTML = `<p class="resumo-erro">${esc(err.message)}</p>`;
       return;

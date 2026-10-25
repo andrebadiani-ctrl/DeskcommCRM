@@ -14,8 +14,15 @@ const servidor = http.createServer((req, res) => {
   req.on("data", (c) => (corpo += c));
   req.on("end", () => {
     const body = JSON.parse(corpo);
-    pedidos.push({ headers: req.headers, body });
-    const { status, saida, parada = "end_turn" } = responder(body);
+    pedidos.push({ headers: req.headers, body, url: req.url });
+    const { status, saida, parada = "end_turn", bruto } = responder(body);
+    if (req.url.endsWith("/chat/completions")) {
+      // formato da API da OpenAI (Ollama, Gemini, Groq…)
+      res.writeHead(status, { "content-type": "application/json" });
+      return res.end(JSON.stringify(status === 200
+        ? { id: "c1", object: "chat.completion", model: body.model, choices: [{ index: 0, finish_reason: parada === "length" ? "length" : "stop", message: { role: "assistant", content: bruto ?? JSON.stringify(saida) } }] }
+        : { error: { message: status === 404 ? `model "${body.model}" not found, try pulling it first` : "falhou de propósito" } }));
+    }
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(status === 200
       ? { id: "msg_1", type: "message", role: "assistant", model: body.model, content: [{ type: "text", text: JSON.stringify(saida) }], stop_reason: parada, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }
@@ -39,6 +46,22 @@ const ctx = {
   produtos: [{ nome: "Plano Pro", preco: 499.9, unidade: "mês", ativo: true }, { nome: "Antigo", preco: 1, ativo: false }],
   condicoes: [{ nome: "PIX", parcelas: 1, ajustePercentual: -5, ativo: true }],
 };
+
+// 0) instalação nova, sem chave nenhuma: começa no ChatGPT da conta (grátis)
+assert.equal(ia.config.provedor, "chatgpt");
+assert.equal(ia.publico().configurada, true);
+const manual = await ia.sugerir({ ...ctx, orientacao: "oferecer demonstração" });
+assert.equal(manual.manual, true);
+assert.match(manual.prompt, /Plano Pro: 499\.9 por mês/);
+assert.match(manual.prompt, /<conversa>[\s\S]*90% de desconto[\s\S]*<\/conversa>/);
+assert.match(manual.prompt, /oferecer demonstração/);
+assert.match(manual.prompt, /Responda só com o texto da mensagem/);
+const resumoManual = await ia.resumir(ctx);
+assert.ok(resumoManual.manual && /Etapa sugerida: \(uma destas: Novo Lead/.test(resumoManual.prompt));
+assert.equal(pedidos.length, 0, "modo ChatGPT não chama API nenhuma");
+await assert.rejects(ia.atualizar({ autoAtendimento: true }), /não consegue responder sozinho/);
+console.log("0 ok: modo ChatGPT monta o pedido para copiar, sem chamar API, e não liga o automático");
+await ia.atualizar({ provedor: "anthropic" });
 
 // 1) sem chave e chave com formato errado
 await assert.rejects(ia.sugerir(ctx), (e) => e instanceof ErroIA && /Cadastre a chave/.test(e.message));
@@ -100,6 +123,35 @@ const antes = pedidos.length;
 await assert.rejects(ia.sugerir(ctx), /respondeu com erro 500 \(falhou de propósito\)/);
 assert.equal(pedidos.length - antes, 3, "1 tentativa + 2 novas tentativas automáticas");
 console.log("5 ok: recusa, chave inválida e erro do servidor viram mensagens claras");
+
+// 6) modelo grátis compatível (Ollama / Gemini…): formato do pedido, JSON com sobra e erros
+const base = `http://127.0.0.1:${servidor.address().port}/v1`;
+await ia.atualizar({ provedor: "compativel", compativelUrl: base + "/", compativelModelo: "gemma3:4b", autoAtendimento: true });
+assert.equal(ia.config.compativelUrl, base, "barra do fim removida");
+responder = () => ({ status: 200, bruto: 'Claro! Aqui está:\n```json\n{"acao":"responder","resposta":"Olá, Ana!","motivo":""}\n```' });
+assert.deepEqual(await ia.decidir(ctx), { acao: "responder", resposta: "Olá, Ana!", motivo: "" }, "JSON achado mesmo com texto e ``` em volta");
+const pc = pedidos.at(-1);
+assert.equal(pc.url, "/v1/chat/completions");
+assert.equal(pc.body.model, "gemma3:4b");
+assert.equal(pc.body.response_format.type, "json_schema");
+assert.equal(pc.body.messages[0].role, "system");
+assert.match(pc.body.messages[0].content, /JSON Schema/);
+assert.ok(!pc.headers.authorization, "Ollama sem chave: nada de Authorization");
+await ia.atualizar({ chaveCompativel: "gsk_teste_123" });
+responder = () => ({ status: 200, saida: { resposta: "Oi" } });
+await ia.sugerir(ctx);
+assert.equal(pedidos.at(-1).headers.authorization, "Bearer gsk_teste_123");
+assert.ok(!JSON.stringify(ia.publico()).includes("gsk_teste_123"));
+responder = () => ({ status: 404 });
+await assert.rejects(ia.sugerir(ctx), /ollama pull gemma3:4b/);
+responder = () => ({ status: 401 });
+await assert.rejects(ia.sugerir(ctx), /Chave do serviço recusada/);
+responder = () => ({ status: 200, bruto: "não sei responder em JSON" });
+await assert.rejects(ia.sugerir(ctx), /formato inesperado/);
+await ia.atualizar({ compativelUrl: "http://127.0.0.1:9/v1" });
+await assert.rejects(ia.sugerir(ctx), /Não consegui falar com o Ollama/);
+await assert.rejects(ia.atualizar({ compativelUrl: "ftp://x" }), /Endereço do serviço inválido/);
+console.log("6 ok: serviço compatível (Ollama/Gemini): pedido, chave opcional, JSON tolerante e erros claros");
 
 servidor.close();
 console.log("IA: todos os cenários passaram.");
