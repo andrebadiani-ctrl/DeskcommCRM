@@ -1,0 +1,39 @@
+# Controle de Leads 2026 na internet, com HTTPS automático (certificado grátis do Let's Encrypt,
+# renovado sozinho pelo Caddy). Passo a passo: deploy/LEIA-ME.md — ou rode ./instalar-vps.sh.
+services:
+  app:
+    build: ..
+    image: controle-de-leads-2026
+    restart: unless-stopped
+    user: "1000:1000" # o usuário "node" da imagem; a pasta ./dados precisa ser dele
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?Defina APP_PASSWORD no arquivo .env}
+      TZ: ${TZ:-America/Sao_Paulo}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      IA_COMPATIVEL_CHAVE: ${IA_COMPATIVEL_CHAVE:-}
+    volumes:
+      - ./dados:/app/data # leads, pedidos, conversas e a sessão do WhatsApp
+    expose:
+      - "3000" # só o Caddy fala com o app; nada fica aberto sem HTTPS
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Ollama instalado na própria VPS: http://host.docker.internal:11434/v1
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMINIO: ${DOMINIO:?Defina DOMINIO no arquivo .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-dados:/data # certificados
+      - caddy-config:/config
+
+volumes:
+  caddy-dados:
+  caddy-config:

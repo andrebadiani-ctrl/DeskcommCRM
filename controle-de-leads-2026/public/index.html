@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b3324" />
+  <title>Controle de Leads 2026</title>
+  <!-- Tema escolhido antes de desenhar a página (sem "piscar" claro ao abrir no escuro). -->
+  <script>try { var t = localStorage.getItem("cl2026:tema"); if (t === "claro" || t === "escuro") document.documentElement.dataset.tema = t; } catch (e) {}</script>
+  <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
+  <link rel="apple-touch-icon" href="icones/icone-180.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Leads 2026" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b3324'/%3E%3Cpath d='M8 21l5-6 4 3 7-9' stroke='%2386efac' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-linha">
+      <div class="marca">
+        <span class="marca-icone" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 16l4.5-5.5 3.5 2.7L19 6" /></svg>
+        </span>
+        <div>
+          <h1>Controle de Leads 2026</h1>
+          <p>Funil de vendas · Tabela e Kanban</p>
+        </div>
+      </div>
+      <div class="busca">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+        <input id="busca" type="search" placeholder="Buscar por nome, empresa, cidade, e-mail, telefone…" autocomplete="off" />
+      </div>
+      <div class="topo-acoes">
+        <span class="versao" id="versao" hidden></span>
+        <button type="button" class="topo-tarefas" id="btn-tarefas" title="Tarefas e lembretes"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2" /><path d="M8 2v4M16 2v4M4 9h16M8.5 14.5l2 2 4-4" /></svg><span class="topo-bolha" id="tarefas-bolha" hidden></span></button>
+        <button type="button" class="topo-tarefas" id="btn-instalar" title="Instalar o app neste aparelho" aria-label="Instalar o app" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5" /><path d="M5 19h14" /></svg></button>
+        <button type="button" class="topo-tarefas" id="btn-tema" aria-label="Tema"></button>
+        <span id="wa-pilula" class="wa-pilula" title="Status do WhatsApp">WhatsApp</span>
+        <button id="btn-novo" class="btn btn-primario">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          <span>Novo lead</span>
+        </button>
+      </div>
+    </div>
+    <nav class="abas" role="tablist">
+      <button class="aba ativa" role="tab" data-aba="tabela">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 10v10" /></svg>Tabela
+      </button>
+      <button class="aba" role="tab" data-aba="kanban">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1.5" /><rect x="10" y="4" width="5" height="10" rx="1.5" /><rect x="17" y="4" width="4" height="13" rx="1.5" /></svg>Kanban
+      </button>
+      <button class="aba" role="tab" data-aba="pedidos">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h15l-1.5 8h-12z" /><path d="M6 6L5 3H2" /><circle cx="9" cy="19" r="1.5" /><circle cx="18" cy="19" r="1.5" /></svg>Pedidos
+      </button>
+      <button class="aba" role="tab" data-aba="conversas">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /><path d="M8.5 10.5h7M8.5 13.5h4" /></svg>Conversas<span class="aba-bolha" id="cv-bolha" hidden></span>
+      </button>
+      <button class="aba" role="tab" data-aba="resultados">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>Painel
+      </button>
+      <button class="aba" role="tab" data-aba="whatsapp">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.3-3.9A8 8 0 1 1 8 19z" /></svg>WhatsApp
+      </button>
+    </nav>
+  </header>
+
+  <div class="emoji-painel" id="emoji-painel" role="dialog" aria-label="Emojis" hidden></div>
+  <main>
+    <section class="kpis" id="kpis" aria-label="Indicadores"></section>
+
+    <button type="button" class="btn btn-secundario so-celular" id="btn-filtros" aria-expanded="false" aria-controls="filtros">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>Filtros e ordenação
+    </button>
+
+    <section class="filtros" id="filtros">
+      <label>Etapa
+        <select id="f-etapa"><option value="">Todas as etapas</option></select>
+      </label>
+      <label>País
+        <select id="f-pais"><option value="">Todos</option><option>Brasil</option><option>Portugal</option></select>
+      </label>
+      <label>UF / Distrito
+        <select id="f-regiao"><option value="">Todas</option></select>
+      </label>
+      <label>Cidade
+        <input id="f-cidade" type="text" placeholder="Filtrar cidade" />
+      </label>
+      <label>Origem
+        <select id="f-origem"><option value="">Todas</option></select>
+      </label>
+      <label>Etiqueta
+        <select id="f-etiqueta"><option value="">Todas</option></select>
+      </label>
+      <label>Ordenar por
+        <select id="f-ordem">
+          <option value="criadoEm:desc">Mais recentes</option>
+          <option value="criadoEm:asc">Mais antigos</option>
+          <option value="faturamentoMensal:desc">Maior faturamento</option>
+          <option value="faturamentoMensal:asc">Menor faturamento</option>
+        </select>
+      </label>
+      <div class="filtros-acoes">
+        <button id="btn-limpar" class="btn btn-fantasma">Limpar filtros</button>
+        <button id="btn-importar" class="btn btn-secundario">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V9M7 14l5-5 5 5M5 4h14" /></svg>Importar planilha
+        </button>
+        <button id="btn-csv" class="btn btn-secundario">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>Exportar CSV
+        </button>
+      </div>
+    </section>
+
+    <section class="painel" id="painel-tabela">
+      <div class="tabela-rolagem">
+        <table class="tabela" id="tabela">
+          <thead>
+            <tr>
+              <th data-ordem="criadoEm" class="ordenavel">Data de criação</th>
+              <th class="col-nome">Nome</th>
+              <th>E-mail</th>
+              <th>Telefone</th>
+              <th>Cargo</th>
+              <th>Empresa</th>
+              <th data-ordem="faturamentoMensal" class="ordenavel">Faturamento mensal</th>
+              <th>País</th>
+              <th>UF / Distrito</th>
+              <th>Cidade</th>
+              <th>Etapa do funil</th>
+              <th>Origem</th>
+              <th>Etiquetas</th>
+              <th>Observações</th>
+              <th class="col-acoes">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-corpo"></tbody>
+        </table>
+      </div>
+      <p class="vazio" id="tabela-vazia" hidden>Nenhum lead encontrado com esses filtros.</p>
+    </section>
+
+    <section class="painel" id="painel-kanban" hidden>
+      <div class="kanban" id="kanban"></div>
+    </section>
+
+    <section class="painel" id="painel-pedidos" hidden>
+      <div class="pd-topo">
+        <div class="segmentos grandes" role="tablist" aria-label="Pedidos">
+          <button class="segmento ativo" data-pd-aba="pedidos">Pedidos</button>
+          <button class="segmento" data-pd-aba="produtos">Produtos</button>
+          <button class="segmento" data-pd-aba="condicoes">Condições de pagamento</button>
+          <button class="segmento" data-pd-aba="vendedores">Vendedores</button>
+        </div>
+        <div class="pd-acoes">
+          <input type="search" id="pd-busca" placeholder="Buscar pedido, cliente ou produto" autocomplete="off" />
+          <select id="pd-filtro-pagamento" aria-label="Filtrar por pagamento">
+            <option value="">Pagamento: todos</option><option>Pendente</option><option>Parcial</option><option>Atrasado</option><option>Pago</option>
+          </select>
+          <button class="btn btn-fantasma" id="pd-config" title="Dados da empresa e regras">⚙ Empresa</button>
+          <button class="btn btn-primario" id="pd-novo">+ Novo pedido</button>
+        </div>
+      </div>
+
+      <div id="pd-lista-pedidos">
+        <div class="pd-status" id="pd-status"></div>
+        <div class="tabela-rolagem pd-tabela">
+          <table class="tabela">
+            <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Itens</th><th>Pagamento</th><th class="num">Total</th><th>Status</th><th class="col-acoes">Ações</th></tr></thead>
+            <tbody id="pd-corpo"></tbody>
+          </table>
+        </div>
+        <p class="vazio" id="pd-vazio" hidden>Nenhum pedido por aqui. Clique em “+ Novo pedido”.</p>
+      </div>
+
+      <div id="pd-lista-produtos" hidden>
+        <div class="tabela-rolagem pd-tabela">
+          <table class="tabela">
+            <thead><tr><th>Código</th><th>Produto</th><th>Unidade</th><th class="num">Preço</th><th class="num">Estoque</th><th>Ativo</th><th class="col-acoes">Ações</th></tr></thead>
+            <tbody id="pr-corpo"></tbody>
+          </table>
+        </div>
+        <p class="vazio" id="pr-vazio" hidden>Nenhum produto cadastrado.</p>
+      </div>
+
+      <div id="pd-lista-condicoes" hidden>
+        <div class="tabela-rolagem pd-tabela">
+          <table class="tabela">
+            <thead><tr><th>Condição</th><th>Parcelas</th><th>Vencimentos</th><th>Desconto / acréscimo</th><th>Observação</th><th>Ativa</th><th class="col-acoes">Ações</th></tr></thead>
+            <tbody id="cp-corpo"></tbody>
+          </table>
+        </div>
+        <p class="vazio" id="cp-vazio" hidden>Nenhuma condição de pagamento cadastrada.</p>
+      </div>
+
+      <div id="pd-lista-vendedores" hidden>
+        <div class="tabela-rolagem pd-tabela">
+          <table class="tabela">
+            <thead><tr><th>Vendedor</th><th class="num">Comissão</th><th class="num">Vendas (fechadas)</th><th class="num">Comissão a pagar</th><th>Ativo</th><th class="col-acoes">Ações</th></tr></thead>
+            <tbody id="vd-corpo"></tbody>
+          </table>
+        </div>
+        <p class="vazio" id="vd-vazio" hidden>Nenhum vendedor cadastrado. Cadastre para registrar quem fez cada venda e calcular a comissão.</p>
+      </div>
+    </section>
+
+    <section class="painel" id="painel-conversas" hidden>
+      <div class="inbox" id="inbox">
+        <aside class="inbox-lista">
+          <div class="inbox-topo">
+            <div class="busca-local">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+              <input id="cv-busca" type="search" placeholder="Buscar nome, número ou mensagem" autocomplete="off" />
+            </div>
+            <div class="segmentos" role="tablist" aria-label="Filtrar conversas">
+              <button class="segmento segmento-fila" data-cv-filtro="fila" title="Quem mandou mensagem e ainda não teve baixa, por ordem de chegada">Fila<span class="seg-contagem" id="cv-fila-contagem"></span></button>
+              <button class="segmento ativo" data-cv-filtro="todas">Todas</button>
+              <button class="segmento" data-cv-filtro="nao-lidas">Não lidas</button>
+              <button class="segmento" data-cv-filtro="sem-lead">Sem lead</button>
+              <button class="segmento" data-cv-filtro="leads">Leads</button>
+            </div>
+          </div>
+          <div class="cv-lista" id="cv-lista"></div>
+        </aside>
+        <section class="inbox-chat">
+          <div class="cv-vazio" id="cv-vazio">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></svg>
+            <strong>Suas conversas do WhatsApp</strong>
+            <span>Escolha uma conversa para ler, responder e transformar o contato em lead.</span>
+          </div>
+          <div class="cv-conteudo" id="cv-conteudo" hidden>
+            <header class="cv-cabecalho" id="cv-cabecalho"></header>
+            <div class="cv-mensagens-area">
+              <button type="button" class="cv-anteriores" id="cv-anteriores">↑ Carregar mensagens anteriores</button>
+              <div class="cv-mensagens" id="cv-mensagens"></div>
+            </div>
+            <div class="cv-compor">
+              <div class="atalhos" id="cv-atalhos"></div>
+              <div class="cv-citando" id="cv-citando" hidden></div>
+              <div class="anexo-pendente" id="cv-anexo" hidden></div>
+              <div class="gravando" id="cv-gravando" hidden>
+                <button type="button" class="icone-btn del" id="cv-gravar-cancelar" title="Descartar gravação" aria-label="Descartar gravação"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg></button>
+                <span class="gravando-ponto" aria-hidden="true"></span>
+                <span class="gravando-tempo" id="cv-gravar-tempo" aria-live="off">0:00</span>
+                <span class="gravando-onda" id="cv-gravar-onda" aria-hidden="true"></span>
+                <button type="button" class="btn btn-primario" id="cv-gravar-enviar">Enviar áudio</button>
+              </div>
+              <div class="enviar" id="cv-enviar-linha">
+                <div class="campo-com-sugestoes">
+                  <textarea id="cv-texto" rows="2" placeholder="Escreva uma mensagem… (digite / para respostas rápidas)" maxlength="4000"></textarea>
+                  <button type="button" class="botao-emoji" data-emoji-para="cv-texto" title="Emojis" aria-label="Inserir emoji" aria-haspopup="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.6" /></svg></button>
+                  <div class="sugestoes" id="cv-sugestoes" role="listbox" hidden></div>
+                </div>
+                <button type="button" class="icone-btn ia-sugerir" id="cv-sugerir" title="Sugerir resposta com IA (se houver texto na caixa, ele vira a orientação)" aria-label="Sugerir resposta com IA"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg></button>
+                <label class="icone-btn anexar" title="Anexar foto, vídeo, áudio ou documento">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></svg>
+                  <input type="file" id="cv-arquivo" hidden />
+                </label>
+                <button type="button" class="icone-btn microfone" id="cv-gravar" title="Gravar mensagem de voz" aria-label="Gravar mensagem de voz"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg></button>
+                <button type="button" class="btn btn-primario" id="cv-enviar">Enviar</button>
+              </div>
+              <p class="dica" id="cv-aviso"></p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="painel" id="painel-resultados" hidden>
+      <div class="rs-topo">
+        <div class="rs-periodos" role="group" aria-label="Período">
+          <button type="button" data-dias="7">7 dias</button>
+          <button type="button" data-dias="30">30 dias</button>
+          <button type="button" data-dias="90">90 dias</button>
+          <button type="button" data-dias="365">12 meses</button>
+          <button type="button" data-dias="0">Tudo</button>
+        </div>
+        <select id="rs-moeda" aria-label="Moeda" hidden></select>
+        <span class="rs-atualizado" id="rs-atualizado"></span>
+      </div>
+      <div class="rs-cartoes" id="rs-cartoes"></div>
+      <div class="rs-grade">
+        <article class="rs-bloco">
+          <header><h3>Funil</h3><small>Leads que entraram no período e até onde chegaram</small></header>
+          <div id="rs-funil"></div>
+        </article>
+        <article class="rs-bloco">
+          <header><h3>Vendas por mês</h3><small>Últimos 12 meses · pedidos confirmados em diante</small></header>
+          <div id="rs-meses"></div>
+        </article>
+        <article class="rs-bloco">
+          <header><h3>Origem dos leads</h3><small>Quantos vieram de cada canal e quantos viraram venda</small></header>
+          <div id="rs-origens"></div>
+        </article>
+        <article class="rs-bloco">
+          <header><h3>Contas a receber</h3><small>Parcelas em aberto hoje, de qualquer período</small></header>
+          <div id="rs-receber"></div>
+        </article>
+        <article class="rs-bloco">
+          <header><h3>Vendedores</h3><small>Vendas e comissão no período</small></header>
+          <div id="rs-vendedores"></div>
+        </article>
+        <article class="rs-bloco">
+          <header><h3>Produtos mais vendidos</h3><small>Por valor, no período</small></header>
+          <div id="rs-produtos"></div>
+        </article>
+        <article class="rs-bloco rs-largo">
+          <header><h3>Atendimento no WhatsApp</h3><small>Tempo de resposta, fila e horários em que os clientes mais escrevem</small></header>
+          <div id="rs-atendimento"></div>
+        </article>
+      </div>
+      <div id="rs-dica" class="rs-dica" role="tooltip" hidden></div>
+    </section>
+
+    <section class="painel" id="painel-whatsapp" hidden>
+      <div class="wa-cartao">
+        <div class="wa-cabecalho">
+          <div>
+            <h2>Conexão com o WhatsApp</h2>
+            <p id="wa-descricao">Conecte o seu WhatsApp lendo o QR Code com o celular.</p>
+          </div>
+          <span id="wa-status" class="selo">Desconectado</span>
+        </div>
+        <div class="wa-corpo">
+          <div class="wa-qr" id="wa-qr">
+            <div class="wa-qr-vazio">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3M21 14v7h-7" /></svg>
+              <span>O QR Code aparece aqui</span>
+            </div>
+          </div>
+          <div class="wa-passos">
+            <ol id="wa-instrucoes">
+              <li>Clique em <strong>Gerar QR Code</strong>.</li>
+              <li>No celular, abra o <strong>WhatsApp › Configurações › Dispositivos conectados</strong>.</li>
+              <li>Toque em <strong>Conectar um dispositivo</strong> e aponte a câmera para o QR Code.</li>
+            </ol>
+            <div class="wa-botoes">
+              <button id="btn-wa-conectar" class="btn btn-primario">Gerar QR Code</button>
+              <button id="btn-wa-desconectar" class="btn btn-perigo" hidden>Desconectar</button>
+            </div>
+            <label class="interruptor">
+              <input type="checkbox" id="cfg-auto" />
+              <span class="trilho"></span>
+              <span>Criar lead automaticamente quando um número novo mandar mensagem</span>
+            </label>
+            <p class="dica">Com o WhatsApp conectado, abra qualquer lead e use o botão <strong>WhatsApp</strong> para enviar mensagens. As mensagens recebidas aparecem no histórico do lead.</p>
+            <details class="diagnostico" id="wa-diagnostico" hidden>
+              <summary>Diagnóstico da sincronização</summary>
+              <div id="wa-diag-conteudo"></div>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <div class="auto-grade">
+        <div class="wa-cartao bloco" id="secao-respostas">
+          <div class="bloco-topo">
+            <div>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3L5 13h6l-1 8 8-10h-6z" /></svg>Respostas rápidas</h2>
+              <p>Modelos de mensagem. No chat do lead, digite <kbd>/</kbd> para usar.</p>
+            </div>
+            <button class="btn btn-secundario" id="btn-nova-resposta">+ Nova resposta</button>
+          </div>
+          <div class="lista" id="lista-respostas"></div>
+        </div>
+
+        <div class="wa-cartao bloco" id="secao-proximos">
+          <div class="bloco-topo">
+            <div>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>Próximos envios</h2>
+              <p id="proximos-resumo">Follow-ups agendados para os seus leads.</p>
+            </div>
+          </div>
+          <div class="lista" id="lista-proximos"></div>
+        </div>
+
+        <div class="wa-cartao bloco largo" id="secao-ia">
+          <div class="bloco-topo">
+            <div>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>Assistente de IA</h2>
+              <p>Sugere respostas e resume conversas na aba <strong>Conversas</strong> (botões ✨). Ligado o atendimento automático, responde sozinho os leads em <strong>Em atendimento IA</strong> e passa para <strong>Atendimento Humano</strong> quando não deve responder.</p>
+            </div>
+            <span class="selo" id="ia-selo">Sem chave</span>
+          </div>
+          <form id="form-ia" class="ia-form" autocomplete="off">
+            <label class="campo">Qual IA usar
+              <select name="provedor" id="ia-provedor"></select>
+            </label>
+            <div class="ia-explica" data-para-provedor="chatgpt">
+              <strong>Sem custo de API.</strong> Ao clicar em ✨ na conversa, o sistema copia as instruções e a conversa e abre o
+              <strong>ChatGPT</strong> numa aba nova, na sua conta (a gratuita também serve). Você cola, envia e traz a resposta de volta.
+              Como alguém precisa colar, este modo não faz o atendimento automático.
+            </div>
+            <div class="grade" data-para-provedor="compativel">
+              <label class="campo">Endereço do serviço
+                <input name="compativelUrl" placeholder="http://localhost:11434/v1" spellcheck="false" />
+                <small class="dica">Ollama no computador: <code>http://localhost:11434/v1</code> · Gemini (cota grátis): <code>https://generativelanguage.googleapis.com/v1beta/openai</code></small>
+              </label>
+              <label class="campo">Modelo
+                <input name="compativelModelo" placeholder="gemma3:4b" spellcheck="false" />
+                <small class="dica">No Ollama, baixe antes: <code>ollama pull gemma3:4b</code></small>
+              </label>
+              <label class="campo largo">Chave do serviço (o Ollama não precisa)
+                <input type="password" name="chaveCompativel" id="ia-chave-compativel" autocomplete="off" spellcheck="false" />
+              </label>
+            </div>
+            <div class="grade" data-para-provedor="anthropic">
+              <label class="campo">Chave da API da Anthropic
+                <input type="password" name="chave" id="ia-chave" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+                <small class="dica" id="ia-chave-dica">Crie em console.anthropic.com › API Keys. O uso é cobrado pela Anthropic na sua conta.</small>
+              </label>
+              <label class="campo">Modelo
+                <select name="modelo" id="ia-modelo"></select>
+              </label>
+            </div>
+            <label class="campo">Sobre a empresa e instruções para a IA
+              <textarea name="instrucoes" rows="6" maxlength="8000" placeholder="Ex.: Somos a Verde Soluções, sistemas para clínicas. Atendemos de seg. a sex., 9h às 18h. Implantação em até 7 dias. Não fazemos desconto acima de 10%. Sempre ofereça uma demonstração gratuita."></textarea>
+              <small class="dica">A IA usa só isto, os produtos e as condições de pagamento cadastrados em Pedidos. O que não estiver aqui ela não inventa: diz que vai confirmar com a equipe.</small>
+            </label>
+            <label class="interruptor">
+              <input type="checkbox" name="autoAtendimento" id="ia-auto" />
+              <span class="trilho"></span>
+              <span>Atendimento automático para os leads na etapa <strong>Em atendimento IA</strong> <small class="dica" id="ia-auto-aviso"></small></span>
+            </label>
+            <div class="grade ia-auto-opcoes">
+              <label class="campo">Mensagem ao passar para a equipe
+                <input name="mensagemTransferencia" maxlength="500" />
+              </label>
+              <label class="campo">Esperar o cliente terminar de escrever (segundos)
+                <input name="esperaSegundos" type="number" min="0" max="300" />
+              </label>
+              <label class="campo">Ficar quieta se alguém da equipe respondeu nos últimos (minutos)
+                <input name="humanoAssumeMinutos" type="number" min="0" max="1440" />
+              </label>
+              <label class="campo">Máximo de respostas por conversa a cada hora
+                <input name="maxRespostasPorHora" type="number" min="1" max="60" />
+              </label>
+            </div>
+            <div class="ia-botoes">
+              <button type="button" class="btn btn-secundario" id="ia-testar">Testar conexão</button>
+              <button type="submit" class="btn btn-primario">Salvar</button>
+            </div>
+          </form>
+          <details class="diagnostico" id="ia-atividade-bloco">
+            <summary>Atividade recente da IA</summary>
+            <div id="ia-atividade"></div>
+          </details>
+        </div>
+
+        <div class="wa-cartao bloco largo" id="secao-regras">
+          <div class="bloco-topo">
+            <div>
+              <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 12h10v4H4zM4 20h6" /></svg>Follow-ups automáticos por etapa do Kanban</h2>
+              <p>Quando um lead <strong>entra</strong> numa etapa, as regras dela são agendadas. Se ele mudar de etapa antes, o envio é cancelado.</p>
+            </div>
+            <button class="btn btn-secundario" id="btn-nova-regra">+ Nova regra</button>
+          </div>
+          <div class="janela">
+            <span>Enviar só entre</span>
+            <select id="janela-inicio" aria-label="Início da janela de envio"></select>
+            <span>e</span>
+            <select id="janela-fim" aria-label="Fim da janela de envio"></select>
+            <span class="dica">— fora desse horário, os envios esperam a janela abrir.</span>
+          </div>
+          <div id="lista-regras"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ChatGPT da conta da pessoa: copiar, colar e trazer a resposta -->
+  <dialog class="modal modal-pequeno" id="modal-chatgpt" aria-labelledby="chatgpt-titulo">
+    <div class="modal-topo">
+      <h2 id="chatgpt-titulo">Usar o ChatGPT</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo">
+      <ol class="chatgpt-passos">
+        <li><strong>Copie o pedido e abra o ChatGPT</strong> — já vai com as instruções da empresa e a conversa.
+          <div class="chatgpt-acoes"><button type="button" class="btn btn-primario" id="chatgpt-abrir">Copiar e abrir o ChatGPT</button><span class="dica" id="chatgpt-copiado"></span></div>
+          <details class="chatgpt-ver"><summary>Ver o texto que será copiado</summary><textarea id="chatgpt-prompt" rows="8" readonly></textarea></details>
+        </li>
+        <li><strong>No ChatGPT, cole</strong> (<kbd>Ctrl</kbd>+<kbd>V</kbd>, no celular: segurar e Colar) <strong>e envie.</strong></li>
+        <li id="chatgpt-passo-voltar"><strong>Copie a resposta e cole aqui:</strong>
+          <textarea id="chatgpt-resposta" rows="5" placeholder="Cole aqui a resposta do ChatGPT"></textarea>
+        </li>
+      </ol>
+      <p class="dica">O ChatGPT usa a sua conta da OpenAI, com as configurações de privacidade dela. Áudios e fotos da conversa não vão junto.</p>
+    </div>
+    <div class="modal-rodape">
+      <span class="espaco"></span>
+      <button type="button" class="btn btn-secundario" data-fechar>Fechar</button>
+      <button type="button" class="btn btn-primario" id="chatgpt-usar">Usar esta resposta</button>
+    </div>
+  </dialog>
+
+  <!-- Resumo da conversa pela IA -->
+  <dialog class="modal modal-pequeno" id="modal-resumo" aria-labelledby="resumo-titulo">
+    <div class="modal-topo">
+      <h2 id="resumo-titulo">✨ Resumo da conversa</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo" id="resumo-corpo"></div>
+    <div class="modal-rodape" id="resumo-rodape"></div>
+  </dialog>
+
+  <!-- Modal do lead (criar / ver / editar) -->
+  <dialog id="modal" class="modal">
+    <form id="form-lead" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="modal-titulo">Novo lead</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label class="largo">Nome *<input name="nome" required maxlength="200" /></label>
+          <label>E-mail<input name="email" type="email" maxlength="200" /></label>
+          <label>Telefone<input name="telefone" type="tel" maxlength="40" placeholder="+55 11 99999-9999" /></label>
+          <label>Cargo<input name="cargo" maxlength="200" /></label>
+          <label>Empresa<input name="empresa" maxlength="200" /></label>
+          <label>Faturamento mensal<input name="faturamentoMensal" type="number" min="0" step="0.01" inputmode="decimal" /></label>
+          <label>Data de criação<input name="criadoEm" type="date" /></label>
+          <label>País
+            <select name="pais"><option value="">Selecione</option><option>Brasil</option><option>Portugal</option></select>
+          </label>
+          <label id="campo-uf" hidden>UF<select name="uf"></select></label>
+          <label id="campo-distrito" hidden>Distrito<select name="distrito"></select></label>
+          <label>Cidade<input name="cidade" maxlength="200" /></label>
+          <label>Etapa do funil<select name="etapa"></select></label>
+          <label>Origem<input name="origem" maxlength="60" list="lista-origens" placeholder="WhatsApp, Instagram, Indicação…" /></label>
+          <label>Etiquetas<input name="etiquetas" maxlength="600" placeholder="separe por vírgula: vip, clínica, retorno" /></label>
+          <label class="largo">Observações<textarea name="observacoes" rows="4" maxlength="5000"></textarea></label>
+        </div>
+
+        <div class="nota-rapida" id="bloco-nota" hidden>
+          <input id="nota-texto" placeholder="Nota rápida (ex.: ligou pedindo retorno amanhã)" maxlength="1000" />
+          <button type="button" class="btn btn-secundario" id="btn-nota">Adicionar nota</button>
+        </div>
+
+        <div class="historico" id="bloco-wa" hidden>
+          <h3>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.3-3.9A8 8 0 1 1 8 19z" /></svg>
+            WhatsApp
+            <a href="#" class="ver-conversa" id="lead-ver-conversa" hidden>Abrir em Conversas →</a>
+          </h3>
+          <div class="mensagens" id="mensagens"></div>
+          <div class="atalhos" id="atalhos-respostas"></div>
+          <div class="enviar">
+            <div class="campo-com-sugestoes">
+              <textarea id="wa-texto" rows="2" placeholder="Escreva uma mensagem… (digite / para respostas rápidas)" maxlength="4000"></textarea>
+              <button type="button" class="botao-emoji" data-emoji-para="wa-texto" title="Emojis" aria-label="Inserir emoji" aria-haspopup="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.6" /></svg></button>
+              <div class="sugestoes" id="sugestoes" role="listbox" hidden></div>
+            </div>
+            <button type="button" class="btn btn-primario" id="btn-wa-enviar">Enviar</button>
+          </div>
+          <p class="dica" id="wa-aviso-modal"></p>
+        </div>
+
+        <div class="historico" id="bloco-tarefas" hidden>
+          <h3><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2" /><path d="M8 2v4M16 2v4M4 9h16M8.5 14.5l2 2 4-4" /></svg>Tarefas deste lead</h3>
+          <div class="lista compacta" id="tarefas-lead"></div>
+          <div class="nova-tarefa" data-nova-tarefa="lead">
+            <input data-tarefa-titulo placeholder="O que fazer? Ex.: ligar para confirmar a reunião" maxlength="200" />
+            <div class="nova-tarefa-linha">
+              <input data-tarefa-quando type="datetime-local" aria-label="Quando" />
+              <button type="button" class="btn btn-secundario" data-tarefa-adicionar>Adicionar</button>
+            </div>
+            <div class="atalhos-hora" data-atalhos-hora></div>
+          </div>
+        </div>
+
+        <div class="historico" id="bloco-pedidos" hidden>
+          <h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h15l-1.5 8h-12z" /><path d="M6 6L5 3H2" /><circle cx="9" cy="19" r="1.5" /><circle cx="18" cy="19" r="1.5" /></svg>Pedidos deste lead
+            <button type="button" class="btn btn-secundario mini" id="lead-novo-pedido" style="margin-left:auto">+ Novo pedido</button></h3>
+          <div class="lista compacta" id="pedidos-lead"></div>
+        </div>
+
+        <div class="historico" id="bloco-followups" hidden>
+          <h3><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>Follow-ups deste lead</h3>
+          <div class="lista compacta" id="followups-lead"></div>
+          <div class="agendar">
+            <textarea id="fu-texto" rows="2" placeholder="Mensagem do follow-up (aceita {primeiro_nome}, {empresa}…)" maxlength="4000"></textarea>
+            <div class="agendar-linha">
+              <select id="fu-modelo" aria-label="Usar resposta rápida"><option value="">Usar resposta rápida…</option></select>
+              <input id="fu-quando" type="datetime-local" aria-label="Quando enviar" />
+              <button type="button" class="btn btn-secundario" id="btn-fu-agendar">Agendar</button>
+            </div>
+            <label class="check"><input type="checkbox" id="fu-cancelar" checked /> Cancelar se o lead responder antes</label>
+          </div>
+          <label class="check optout"><input type="checkbox" id="fu-optout" /> Não enviar follow-ups automáticos para este lead</label>
+        </div>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="btn-excluir" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario" id="btn-salvar">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <datalist id="lista-origens"></datalist>
+
+  <!-- Tarefas e lembretes -->
+  <dialog id="modal-tarefas" class="modal">
+    <div class="modal-topo">
+      <h2>Tarefas e lembretes</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo">
+      <div class="nova-tarefa destaque" data-nova-tarefa="geral">
+        <input data-tarefa-titulo placeholder="Nova tarefa — ex.: mandar proposta para a Ana" maxlength="200" />
+        <div class="nova-tarefa-linha">
+          <select data-tarefa-lead aria-label="Lead (opcional)"></select>
+          <input data-tarefa-quando type="datetime-local" aria-label="Quando" />
+          <button type="button" class="btn btn-primario" data-tarefa-adicionar>Adicionar</button>
+        </div>
+        <div class="atalhos-hora" data-atalhos-hora></div>
+      </div>
+      <div id="tarefas-lista"></div>
+      <div class="avisos-config">
+        <h4>Avisos neste aparelho</h4>
+        <label class="check"><input type="checkbox" id="cfg-som" /> Tocar som quando chegar mensagem ou lembrete</label>
+        <div class="notif-linha">
+          <span id="notif-estado"></span>
+          <button type="button" class="btn btn-secundario mini" id="btn-notif">Ativar notificações</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="lembretes" id="lembretes" aria-live="assertive"></div>
+
+  <!-- Importar planilha -->
+  <dialog id="modal-importar" class="modal modal-largo">
+    <div class="modal-topo">
+      <h2>Importar leads de planilha</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo">
+      <div id="imp-passo-arquivo">
+        <label class="soltar-arquivo" id="imp-soltar">
+          <input type="file" id="imp-arquivo" accept=".csv,.txt,text/csv" hidden />
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4" /></svg>
+          <strong>Clique para escolher a planilha</strong>
+          <span>ou arraste o arquivo para cá — formato CSV</span>
+        </label>
+        <p class="dica">Está no Excel ou no Google Planilhas? Use <strong>Arquivo › Salvar como / Fazer download › CSV</strong>. A primeira linha deve ter os nomes das colunas (Nome, Telefone, E-mail, Empresa…).</p>
+      </div>
+      <div id="imp-passo-mapa" hidden>
+        <p class="imp-resumo" id="imp-resumo"></p>
+        <h4 class="imp-titulo">1. Confira de onde vem cada informação</h4>
+        <div class="imp-mapa" id="imp-mapa"></div>
+        <h4 class="imp-titulo">2. Opções</h4>
+        <div class="grade">
+          <label>Etapa para quem não tiver etapa<select id="imp-etapa"></select></label>
+          <label>Origem para quem não tiver origem<input id="imp-origem" list="lista-origens" value="Planilha" maxlength="60" /></label>
+          <label class="largo"><span class="check"><input type="checkbox" id="imp-duplicados" checked /> Pular quem já está cadastrado (mesmo telefone ou e-mail)</span></label>
+        </div>
+        <h4 class="imp-titulo">3. Prévia</h4>
+        <div class="tabela-rolagem imp-previa"><table class="tabela" id="imp-previa"></table></div>
+      </div>
+      <div id="imp-passo-resultado" hidden></div>
+    </div>
+    <div class="modal-rodape">
+      <button type="button" class="btn btn-fantasma" id="imp-voltar" hidden>Escolher outro arquivo</button>
+      <span class="espaco"></span>
+      <button type="button" class="btn btn-fantasma" data-fechar>Fechar</button>
+      <button type="button" class="btn btn-primario" id="imp-confirmar" hidden>Importar</button>
+    </div>
+  </dialog>
+
+  <!-- Pedido -->
+  <dialog id="modal-pedido" class="modal modal-largo">
+    <form id="form-pedido" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="pedido-titulo">Novo pedido</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label class="largo">Cliente *
+            <select name="leadId" id="pedido-cliente"></select>
+          </label>
+          <label class="largo" id="campo-cliente-avulso" hidden>Nome do cliente *<input name="clienteNome" maxlength="200" placeholder="Cliente sem cadastro" /></label>
+        </div>
+
+        <div class="itens-pedido">
+          <div class="itens-cabecalho"><span>Produto / descrição</span><span>Qtd.</span><span>Preço unit.</span><span>Total</span><span></span></div>
+          <div id="pedido-itens"></div>
+          <button type="button" class="btn btn-fantasma mini" id="pedido-add-item">+ Adicionar item</button>
+        </div>
+
+        <div class="grade">
+          <label>Condição de pagamento<select name="condicaoId" id="pedido-condicao"></select></label>
+          <label>Status<select name="status" id="pedido-status"></select></label>
+          <label>Vendedor<select name="vendedorId" id="pedido-vendedor"></select></label>
+          <label>Desconto (valor)<input name="desconto" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00" /></label>
+          <label>Frete (valor)<input name="frete" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00" /></label>
+          <label class="largo">Observações<textarea name="observacoes" rows="2" maxlength="2000" placeholder="Prazo de entrega, endereço, combinados…"></textarea></label>
+        </div>
+
+        <div class="totais" id="pedido-totais"></div>
+        <div class="parcelas-pedido" id="pedido-parcelas"></div>
+        <div class="historico-status" id="pedido-historico"></div>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="pedido-excluir" hidden>Excluir</button>
+        <button type="button" class="btn btn-secundario" id="pedido-whatsapp" hidden>Enviar resumo no WhatsApp</button>
+        <a class="btn btn-secundario" id="pedido-imprimir" target="_blank" rel="noopener" hidden>Imprimir / PDF</a>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario" id="pedido-salvar">Salvar pedido</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Produto -->
+  <dialog id="modal-produto" class="modal modal-pequeno">
+    <form id="form-produto" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="produto-titulo">Novo produto</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label class="largo">Nome *<input name="nome" maxlength="200" /></label>
+          <label>Código / SKU<input name="codigo" maxlength="50" /></label>
+          <label>Unidade<input name="unidade" maxlength="12" placeholder="un, kg, cx, mês…" /></label>
+          <label>Preço *<input name="preco" type="number" min="0" step="0.01" inputmode="decimal" /></label>
+          <label class="check-campo"><span>&nbsp;</span><span class="check"><input type="checkbox" name="ativo" checked /> Ativo (aparece nos pedidos)</span></label>
+          <label class="largo"><span class="check"><input type="checkbox" name="controlarEstoque" /> Controlar estoque (baixa quando o pedido é confirmado, volta se for cancelado)</span></label>
+          <label class="campo-estoque">Estoque atual<input name="estoque" type="number" step="any" inputmode="decimal" /></label>
+          <label class="campo-estoque">Avisar quando ficar abaixo de<input name="estoqueMinimo" type="number" min="0" step="any" inputmode="decimal" /></label>
+          <label class="largo">Descrição<textarea name="descricao" rows="3" maxlength="1000"></textarea></label>
+        </div>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="produto-excluir" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar produto</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Condição de pagamento -->
+  <dialog id="modal-condicao" class="modal modal-pequeno">
+    <form id="form-condicao" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="condicao-titulo">Nova condição de pagamento</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label class="largo">Nome *<input name="nome" maxlength="100" placeholder="Ex.: PIX à vista, Cartão 3x, Boleto 30/60/90" /></label>
+          <label>Parcelas<input name="parcelas" type="number" min="1" max="48" step="1" value="1" /></label>
+          <label>Desconto (−) ou acréscimo (+) em %<input name="ajustePercentual" type="number" min="-100" max="100" step="0.01" value="0" /></label>
+          <label>1ª parcela vence em (dias)<input name="primeiroVencimentoDias" type="number" min="0" max="365" step="1" value="0" /></label>
+          <label>Intervalo entre parcelas (dias)<input name="intervaloDias" type="number" min="1" max="365" step="1" value="30" /></label>
+          <label class="largo">Observação<input name="descricao" maxlength="300" placeholder="Ex.: 5% de desconto, sem juros…" /></label>
+          <label class="largo"><span class="check"><input type="checkbox" name="ativo" checked /> Ativa (aparece nos pedidos)</span></label>
+        </div>
+        <p class="dica">Use número negativo para desconto (−5 = 5% de desconto) e positivo para acréscimo (3 = 3% de juros).</p>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="condicao-excluir" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar condição</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Vendedor -->
+  <dialog id="modal-vendedor" class="modal modal-pequeno">
+    <form id="form-vendedor" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="vendedor-titulo">Novo vendedor</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label>Nome *<input name="nome" maxlength="100" /></label>
+          <label>Comissão (%)<input name="comissaoPercentual" type="number" min="0" max="100" step="0.01" value="0" /></label>
+          <label class="largo"><span class="check"><input type="checkbox" name="ativo" checked /> Ativo (aparece nos pedidos)</span></label>
+        </div>
+        <p class="dica">A comissão é calculada sobre o total do pedido e conta só para vendas fechadas (Confirmado em diante; cancelado não conta).</p>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="vendedor-excluir" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar vendedor</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dados da empresa e regras dos pedidos -->
+  <dialog id="modal-pd-config" class="modal modal-pequeno">
+    <form id="form-pd-config" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2>Dados da empresa</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <p class="dica">Aparecem no cabeçalho do pedido impresso / PDF.</p>
+        <div class="grade">
+          <label class="largo">Nome da empresa<input name="nome" maxlength="120" /></label>
+          <label>CNPJ / NIF<input name="documento" maxlength="40" /></label>
+          <label>Telefone<input name="telefone" maxlength="40" /></label>
+          <label class="largo">E-mail<input name="email" maxlength="120" /></label>
+          <label class="largo">Endereço<input name="endereco" maxlength="300" /></label>
+          <label class="largo"><span class="check"><input type="checkbox" name="moverLeadParaGanho" /> Quando um pedido for confirmado, mover o lead para “Ganho” no Kanban</span></label>
+        </div>
+      </div>
+      <div class="modal-rodape">
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Resposta rápida -->
+  <dialog id="modal-resposta" class="modal modal-pequeno">
+    <form id="form-resposta" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="resposta-titulo">Nova resposta rápida</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label>Atalho *<span class="prefixo"><span>/</span><input name="atalho" maxlength="30" placeholder="ola" autocomplete="off" /></span></label>
+          <label>Título<input name="titulo" maxlength="80" placeholder="Boas-vindas" /></label>
+          <label class="largo">Mensagem *<textarea name="texto" rows="5" maxlength="4000"></textarea></label>
+        </div>
+        <p class="dica variaveis">Variáveis: <code>{primeiro_nome}</code> <code>{nome}</code> <code>{empresa}</code> <code>{cargo}</code> <code>{cidade}</code> <code>{etapa}</code> — clique para inserir.</p>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="btn-excluir-resposta" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Regra de follow-up -->
+  <dialog id="modal-regra" class="modal modal-pequeno">
+    <form id="form-regra" method="dialog" novalidate>
+      <div class="modal-topo">
+        <h2 id="regra-titulo">Nova regra de follow-up</h2>
+        <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+      </div>
+      <div class="modal-corpo">
+        <div class="grade">
+          <label>Quando o lead estiver na etapa<select name="etapa"></select></label>
+          <label>Nome da regra<input name="nome" maxlength="80" placeholder="Lembrete da proposta" /></label>
+          <label class="largo">Esperar
+            <span class="tempo">
+              <input name="quantidade" type="number" min="0" step="1" value="1" />
+              <select name="unidade"><option value="1">minutos</option><option value="60" selected>horas</option><option value="1440">dias</option></select>
+              <span>e então enviar:</span>
+            </span>
+          </label>
+          <label class="largo">Mensagem *<textarea name="texto" rows="5" maxlength="4000"></textarea></label>
+          <label class="largo">Depois de enviar, mover o lead para
+            <select name="moverPara"></select>
+          </label>
+        </div>
+        <p class="dica variaveis">Variáveis: <code>{primeiro_nome}</code> <code>{nome}</code> <code>{empresa}</code> <code>{cargo}</code> <code>{cidade}</code> <code>{etapa}</code> — clique para inserir.</p>
+        <label class="check"><input type="checkbox" name="cancelarSeResponder" checked /> Não enviar se o lead responder antes</label>
+        <label class="check"><input type="checkbox" name="ativo" checked /> Regra ativa</label>
+        <p class="dica">A regra vale para os leads que <strong>entrarem</strong> na etapa a partir de agora.</p>
+      </div>
+      <div class="modal-rodape">
+        <button type="button" class="btn btn-perigo-leve" id="btn-excluir-regra" hidden>Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn btn-fantasma" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn-primario">Salvar regra</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Follow-ups de uma etapa (aberto pelo Kanban) -->
+  <dialog id="modal-etapa" class="modal modal-pequeno">
+    <div class="modal-topo">
+      <h2 id="etapa-titulo">Follow-ups da etapa</h2>
+      <button type="button" class="icone-btn" data-fechar aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+    </div>
+    <div class="modal-corpo">
+      <p class="dica">Quando um lead entra nesta etapa, estas mensagens são agendadas automaticamente.</p>
+      <div id="etapa-regras"></div>
+    </div>
+    <div class="modal-rodape">
+      <span class="espaco"></span>
+      <button type="button" class="btn btn-primario" id="btn-etapa-nova-regra">+ Nova regra nesta etapa</button>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="regioes.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+.env
+dados/
+# o modelo de configuração vai junto (o .gitignore da raiz ignora .env*)
+!.env.exemplo
